@@ -46,7 +46,7 @@ Every report is a draft: it says so in the draft notice (in the header of the ex
 
 ## My role
 
-Complaint Dossier is a public rebuild of a tool I first built in my working-student job in pharmaceutical quality assurance, where it turned the complaint list into individual report drafts in the company template, and I reviewed each one. For this version I set the requirements and the scope; the two report prompts follow the prompts I wrote for the original tool, translated and without anything company-specific. An AI coding agent (Claude) wrote the code, tests and documentation, and the commits name it as co-author. The data is synthetic and the templates are neutral.
+Complaint Dossier is a public rebuild of a tool I first built in my working-student job in pharmaceutical quality assurance, where it turned the complaint list into individual report drafts in the company template, and I reviewed each one. For this version I set the requirements and the scope; the two report prompts follow the prompts I wrote for the original tool, translated and without anything company-specific. An Claude Opus 5.5 rewrote the code here based on the original project but without company data. The data is synthetic and the templates are neutral. This repo should work on a PC without admin rights and the ability to install any form of node.js or python on the system. 
 
 ## Tech stack
 
