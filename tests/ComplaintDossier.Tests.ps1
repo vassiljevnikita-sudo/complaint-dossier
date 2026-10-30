@@ -262,6 +262,43 @@ Describe 'Approval when automated checks failed' {
     }
 }
 
+Describe 'Committed sample in docs/sample' {
+    BeforeAll {
+        $script:Sample = Join-Path (Join-Path $script:Root 'docs') 'sample'
+        $script:SampleAudit = Read-JsonFile (Join-Path $script:Sample 'audit.json')
+    }
+    It 'is an unapproved demo run on the synthetic data with all checks passed' {
+        $script:SampleAudit.mode | Should -Be 'demo'
+        $script:SampleAudit.status | Should -Be 'DRAFT'
+        @($script:SampleAudit.checks | Where-Object { -not $_.passed }).Count | Should -Be 0
+        Join-Path $script:Sample 'complaint-dossier-sample-DRAFT.pdf' | Should -Exist
+    }
+    It 'matches the hashes in its audit.json' {
+        foreach ($name in 'prompt', 'statistics', 'response', 'report') {
+            $artifact = $script:SampleAudit.artifacts.$name
+            Get-Sha256 (Join-Path $script:Sample $artifact.file) | Should -Be $artifact.sha256 -Because $artifact.file
+        }
+    }
+    It 'matches the inputs and the report the current code produces' {
+        $run = Join-Path $TestDrive 'sample-check'
+        & (Join-Path $script:Root 'Invoke-ComplaintDossier.ps1') -Demo -OutputPath $run 6> $null
+        $fresh = Read-JsonFile (Join-Path $run 'audit.json')
+        foreach ($item in $fresh.inputs) {
+            ($script:SampleAudit.inputs | Where-Object path -eq $item.path).sha256 | Should -Be $item.sha256 -Because $item.path
+        }
+        foreach ($name in 'prompt', 'statistics', 'response') {
+            $script:SampleAudit.artifacts.$name.sha256 | Should -Be $fresh.artifacts.$name.sha256 -Because $name
+        }
+        # Run ID and generation time differ between runs; everything else must match.
+        $normalize = {
+            param($path, $runId)
+            ((Get-DocxText $path).Replace($runId, '<run id>')) -replace '\d{4}-\d\d-\d\d \d\d:\d\d:\d\d', '<time>'
+        }
+        $expected = & $normalize (Join-Path $script:Sample $script:SampleAudit.artifacts.report.file) $script:SampleAudit.runId
+        & $normalize (Join-Path $run $fresh.artifacts.report.file) $fresh.runId | Should -Be $expected
+    }
+}
+
 Describe 'Report template' {
     It 'fails when the template has no body anchor' {
         $template = Join-Path $TestDrive 'bad.docx'

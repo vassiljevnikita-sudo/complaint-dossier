@@ -1,0 +1,159 @@
+{
+  "schema": "complaint-dossier/audit/v1",
+  "tool": {
+    "name": "Complaint Dossier",
+    "version": "0.2.0"
+  },
+  "runId": "20261030T023604Z-7f1975",
+  "mode": "demo",
+  "status": "DRAFT",
+  "operator": {
+    "osAccount": "runneradmin",
+    "host": "PowerShell 7.6.7 (Core)"
+  },
+  "model": {
+    "configured": "none (demo mode)",
+    "copilot": null
+  },
+  "caseIds": [
+    "SYN-2026-001",
+    "SYN-2026-002",
+    "SYN-2026-003",
+    "SYN-2026-004",
+    "SYN-2026-005",
+    "SYN-2026-006",
+    "SYN-2026-007",
+    "SYN-2026-008",
+    "SYN-2026-009",
+    "SYN-2026-010"
+  ],
+  "inputs": [
+    {
+      "role": "config",
+      "path": "config.example.json",
+      "sha256": "53e4ee6e7d516ecc2c137ae0c565b05d9d0c4589e29664d28f80a41990054fab"
+    },
+    {
+      "role": "workbook",
+      "path": "samples/cases.xlsx",
+      "sha256": "58be5a50ad990fc1052a380749605fcda06ff83c007ac9b77c9b1e9a21ede77e"
+    },
+    {
+      "role": "prompt-template",
+      "path": "prompts/dossier-prompt.txt",
+      "sha256": "4e52d14939cfce1727df95c499f2a37644aae69c10c00a427bf483aebaec6272"
+    },
+    {
+      "role": "report-template",
+      "path": "templates/report-template.docx",
+      "sha256": "0ba238cd1882159c84df848b86645a32958fdf590d5c8048bdf1f6ab7b8e152e"
+    },
+    {
+      "role": "case-document",
+      "path": "samples/documents/SYN-2026-001/intake-note.txt",
+      "sha256": "ec5b1b53cd4bae3529d0d30fd6f43336424ce4fbfba8a516830bc66e95b61979"
+    },
+    {
+      "role": "case-document",
+      "path": "samples/documents/SYN-2026-006/transport-note.txt",
+      "sha256": "e1ebe70c80150a890c001e86869dbd619351dedce45cb0149cfe7cc5abb3786f"
+    },
+    {
+      "role": "case-document",
+      "path": "samples/documents/SYN-2026-007/intake-note.txt",
+      "sha256": "f966f611ea968e4897e859f5cc7101349f81184766007b216ea517ac89bfef12"
+    },
+    {
+      "role": "case-document",
+      "path": "samples/documents/SYN-2026-007/lab-request.txt",
+      "sha256": "90e35fcc416362df31a92452d1fa7df24a837d7773130a2301dc71b0ad81870d"
+    },
+    {
+      "role": "case-document",
+      "path": "samples/documents/SYN-2026-008/transport-note.txt",
+      "sha256": "91c237b0f3ccf9c8af2d51526d1269aa78a8851a7987b043922ef10327397ceb"
+    },
+    {
+      "role": "case-document",
+      "path": "samples/documents/SYN-2026-010/customer-email.txt",
+      "sha256": "6b467a24dbd18a742cbbe822f6da0b2d7c2811f487fe85bf50e0564d42f3e6b6"
+    },
+    {
+      "role": "demo-response",
+      "path": "samples/demo-response.md",
+      "sha256": "acb357d5c62c2b12caf747d0f05e2c7c18e6b647dc79066fa43e2a30aa7fac55"
+    }
+  ],
+  "artifacts": {
+    "prompt": {
+      "file": "prompt.txt",
+      "sha256": "ffed69c91d962628336967cc61ee9bccdcf2432cb2082d141d2658c4f68a9e8b"
+    },
+    "statistics": {
+      "file": "statistics.json",
+      "sha256": "6911bddb035feaaac4de7277b334828feeff3fead9c747447d8e75bf63a0cc0f"
+    },
+    "response": {
+      "file": "response.md",
+      "sha256": "acb357d5c62c2b12caf747d0f05e2c7c18e6b647dc79066fa43e2a30aa7fac55"
+    },
+    "report": {
+      "file": "complaint-dossier-20261030T023604Z-7f1975-DRAFT.docx",
+      "sha256": "4aafd2aeb0dafd8b6ef1eb6d1c015f6deb5a5fb705bd1c3972235f71e268adaf"
+    }
+  },
+  "checks": [
+    {
+      "name": "Response is not empty",
+      "passed": true,
+      "detail": "2312 characters"
+    },
+    {
+      "name": "Response differs from prompt",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "name": "Required sections present",
+      "passed": true,
+      "detail": "all present"
+    },
+    {
+      "name": "Cited case IDs exist",
+      "passed": true,
+      "detail": "9 case IDs cited, all found in the input"
+    }
+  ],
+  "review": {
+    "reviewer": null,
+    "signedAtUtc": null,
+    "comment": null
+  },
+  "events": [
+    {
+      "atUtc": "2026-10-30T02:36:04Z",
+      "event": "run-started",
+      "detail": "mode=Demo"
+    },
+    {
+      "atUtc": "2026-10-30T02:36:04Z",
+      "event": "cases-read",
+      "detail": "10 cases, 6 documents"
+    },
+    {
+      "atUtc": "2026-10-30T02:36:05Z",
+      "event": "prompt-built",
+      "detail": "5602 characters"
+    },
+    {
+      "atUtc": "2026-10-30T02:36:05Z",
+      "event": "response-received",
+      "detail": "demo response copied"
+    },
+    {
+      "atUtc": "2026-10-30T02:36:05Z",
+      "event": "report-written",
+      "detail": "complaint-dossier-20261030T023604Z-7f1975-DRAFT.docx"
+    }
+  ]
+}
