@@ -25,7 +25,7 @@ Describe 'Repository' {
         $hits | Should -BeNullOrEmpty
     }
     It 'marks every sample file as synthetic in its first line' {
-        foreach ($file in Get-ChildItem -LiteralPath (Join-Path $script:Root 'samples') -Recurse -File -Include *.txt, *.md) {
+        foreach ($file in Get-ChildItem -LiteralPath (Join-Path $script:Root 'samples') -Recurse -File -Include *.txt, *.md, *.csv) {
             (Get-Content -LiteralPath $file.FullName -TotalCount 1) | Should -Match 'SYNTHETIC' -Because (Get-Relative $file)
         }
     }

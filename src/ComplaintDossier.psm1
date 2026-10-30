@@ -1,4 +1,7 @@
 # Complaint Dossier core functions.
+# Drafts one complaint report per case: complaint list (Excel) -> case selection ->
+# per-case prompt -> Microsoft 365 Copilot (or a prewritten demo answer) ->
+# DRAFT Word report -> human review and approval, with an audit log per report.
 # Runs on PowerShell 7 (Windows, Linux, macOS) and on Windows PowerShell 5.1.
 # Keep this file ASCII-only: Windows PowerShell 5.1 reads BOM-less scripts as ANSI.
 
@@ -7,7 +10,7 @@ Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-$script:ToolVersion = '0.2.0'
+$script:ToolVersion = '0.3.0'
 $script:Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $script:FixedZipTime = [DateTimeOffset]::new(2026, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
 
@@ -21,9 +24,19 @@ $script:Markers = [ordered]@{
     Exception  = 'Accepted check failures: (not approved)'
 }
 
+# Headings of the data part of every prompt. A response that contains one of
+# them is a copy of the prompt, not an answer.
+$script:PromptHeadings = @(
+    '### Complaint record (from the complaint list)',
+    '### Similar complaints (calculated by the tool)',
+    '### Case documents',
+    '### Attached files'
+)
+
 # Neutral case schema. Workbook columns are mapped to these names in Workbook.Columns;
 # only CaseId, ReceivedDate, Category and Description are required.
-$script:CaseFields = @('CaseId', 'ReceivedDate', 'Category', 'ProductGroup', 'Batch', 'Severity', 'Status', 'Description')
+$script:CaseFields = @('CaseId', 'ReceivedDate', 'Category', 'ProductGroup', 'Batch', 'Severity', 'Status', 'SampleReceived', 'Description')
+$script:ReportTypes = @('Short', 'Long')
 
 function Get-DossierVersion { $script:ToolVersion }
 function Get-DossierMarkers { $script:Markers }
@@ -133,7 +146,8 @@ function Import-DossierConfig {
 
     $required = @(
         @('Workbook', 'Path'), @('Workbook', 'Sheet'), @('Workbook', 'Columns'),
-        @('Prompt', 'TemplatePath'), @('Report', 'TemplatePath'), @('Report', 'OutputPath')
+        @('CaseFolders', 'Path'), @('Reports', 'Short'), @('Reports', 'Long'),
+        @('Report', 'TemplatePath'), @('Report', 'OutputPath')
     )
     if ($Mode -eq 'Demo') { $required += , @('Demo', 'ResponsePath') }
     if ($Mode -eq 'Live') { $required += @(@('Copilot', 'WindowTitle'), @('Copilot', 'PreferredModel')) }
@@ -150,22 +164,36 @@ function Import-DossierConfig {
             throw "Configuration value missing: Workbook.Columns.$field"
         }
     }
+    $prompts = [ordered]@{}
+    foreach ($type in $script:ReportTypes) {
+        $settings = $config.Reports.$type
+        foreach ($key in 'Marker', 'PromptPath', 'Title') {
+            if ([string]::IsNullOrWhiteSpace([string](Get-ConfigValue $settings $key))) { throw "Configuration value missing: Reports.$type.$key" }
+        }
+        if (@(@(Get-ConfigValue $settings 'RequiredSections') | Where-Object { $_ }).Count -eq 0) { throw "Configuration value missing: Reports.$type.RequiredSections" }
+        $prompts[$type] = Resolve-DossierPath $Root $settings.PromptPath
+    }
+    if ($config.Reports.Short.Marker -eq $config.Reports.Long.Marker) { throw 'Reports.Short.Marker and Reports.Long.Marker must differ.' }
 
     $paths = [ordered]@{
         Config         = [IO.Path]::GetFullPath($Path)
         Workbook       = Resolve-DossierPath $Root $config.Workbook.Path
-        Documents      = Resolve-DossierPath $Root ([string](Get-ConfigValue $config.Documents 'Path'))
-        PromptTemplate = Resolve-DossierPath $Root $config.Prompt.TemplatePath
+        CaseFolders    = Resolve-DossierPath $Root $config.CaseFolders.Path
+        Prompts        = [pscustomobject]$prompts
         ReportTemplate = Resolve-DossierPath $Root $config.Report.TemplatePath
         Output         = Resolve-DossierPath $Root $config.Report.OutputPath
-        DemoResponse   = Resolve-DossierPath $Root ([string](Get-ConfigValue $config.Demo 'ResponsePath'))
+        DemoResponses  = Resolve-DossierPath $Root ([string](Get-ConfigValue $config.Demo 'ResponsePath'))
         Upload         = Resolve-DossierPath $Root ([string](Get-ConfigValue (Get-ConfigValue $config.Copilot 'Upload') 'Path'))
     }
-    foreach ($key in 'Workbook', 'PromptTemplate', 'ReportTemplate') {
+    foreach ($key in 'Workbook', 'ReportTemplate') {
         if (-not (Test-Path -LiteralPath $paths[$key] -PathType Leaf)) { throw "Configured file not found ($key): $($paths[$key])" }
     }
-    if ($Mode -eq 'Demo' -and -not (Test-Path -LiteralPath $paths.DemoResponse -PathType Leaf)) {
-        throw "Configured file not found (Demo.ResponsePath): $($paths.DemoResponse)"
+    foreach ($type in $script:ReportTypes) {
+        if (-not (Test-Path -LiteralPath $prompts[$type] -PathType Leaf)) { throw "Configured file not found (Reports.$type.PromptPath): $($prompts[$type])" }
+    }
+    if (-not (Test-Path -LiteralPath $paths.CaseFolders -PathType Container)) { throw "Configured case folder root not found (CaseFolders.Path): $($paths.CaseFolders)" }
+    if ($Mode -eq 'Demo' -and -not (Test-Path -LiteralPath $paths.DemoResponses -PathType Container)) {
+        throw "Configured folder not found (Demo.ResponsePath): $($paths.DemoResponses)"
     }
     [pscustomobject]@{ Settings = $config; Paths = [pscustomobject]$paths; Root = $Root; Mode = $Mode }
 }
@@ -274,8 +302,8 @@ function ConvertTo-CaseDate {
 }
 
 function Import-DossierCases {
-    <# Reads the case table and maps workbook columns to the neutral case schema. #>
-    param([Parameter(Mandatory)]$Config, [string[]]$CaseId)
+    <# Reads the complaint list and maps workbook columns to the neutral case schema. All rows, sorted by date. #>
+    param([Parameter(Mandatory)]$Config)
     $wb = $Config.Settings.Workbook
     $headerRow = 1
     if ($null -ne (Get-ConfigValue $wb 'HeaderRow')) { $headerRow = [int]$wb.HeaderRow }
@@ -295,6 +323,7 @@ function Import-DossierCases {
     $cases = foreach ($row in $rows) {
         $id = ([string]$row.($map.CaseId)).Trim()
         if (-not $id) { throw "Row $($row._Row) has no case ID." }
+        if ($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$') { throw "Row $($row._Row): case ID '$id' may only contain letters, digits, '.', '_' and '-', because it names the case folder." }
         $case = [ordered]@{}
         foreach ($field in $script:CaseFields) {
             $value = ''
@@ -309,67 +338,162 @@ function Import-DossierCases {
     }
     $duplicates = @($cases | Group-Object CaseId | Where-Object Count -gt 1)
     if ($duplicates.Count) { throw "Duplicate case IDs in workbook: $(($duplicates | ForEach-Object Name) -join ', ')" }
-
-    if ($CaseId) {
-        $unknown = @($CaseId | Where-Object { @($cases.CaseId) -notcontains $_ })
-        if ($unknown.Count) { throw "Case ID not found in workbook: $($unknown -join ', ')" }
-        $cases = @($cases | Where-Object { $CaseId -contains $_.CaseId })
-    }
     @($cases | Sort-Object ReceivedDate, CaseId)
 }
 
-# ---------------------------------------------------------------- statistics
+# ---------------------------------------------------------------- case selection
 
-function Get-DossierStatistics {
-    <#
-      Counts by category and product group, a month-by-month trend (months
-      without cases count as 0) and the batches that occur in more than one case.
-    #>
-    param([Parameter(Mandatory)][object[]]$Cases)
-    $total = $Cases.Count
-    $share = { param($count) [math]::Round(100.0 * $count / $total, 1) }
-    $byCategory = @($Cases | Group-Object Category | Sort-Object @{ Expression = 'Count'; Descending = $true }, Name | ForEach-Object {
-            [pscustomobject]@{ Category = $_.Name; Count = $_.Count; Share = (& $share $_.Count) }
-        })
-    $groupOf = { $value = [string](Get-ConfigValue $_ 'ProductGroup'); if ($value.Trim()) { $value.Trim() } else { '(not given)' } }
-    $byProductGroup = @($Cases | Group-Object $groupOf | Sort-Object @{ Expression = 'Count'; Descending = $true }, Name | ForEach-Object {
-            [pscustomobject]@{ ProductGroup = $_.Name; Count = $_.Count; Share = (& $share $_.Count) }
-        })
-    $withBatch = @($Cases | Where-Object { ([string](Get-ConfigValue $_ 'Batch')).Trim() })
-    $sharedBatches = @($withBatch | Group-Object { ([string](Get-ConfigValue $_ 'Batch')).Trim() } | Where-Object Count -gt 1 | Sort-Object Name | ForEach-Object {
-            [pscustomobject]@{ Batch = $_.Name; Count = $_.Count; CaseIds = @($_.Group | ForEach-Object { $_.CaseId } | Sort-Object) }
-        })
-    $dates = @($Cases | ForEach-Object { $_.ReceivedDate } | Sort-Object)
-    $first = $dates[0]
-    $last = $dates[-1]
-    $month = New-Object DateTime($first.Year, $first.Month, 1)
-    $end = New-Object DateTime($last.Year, $last.Month, 1)
-    $byMonth = while ($month -le $end) {
-        $key = $month.ToString('yyyy-MM')
-        [pscustomobject]@{ Month = $key; Count = @($Cases | Where-Object { $_.ReceivedDate.ToString('yyyy-MM') -eq $key }).Count }
-        $month = $month.AddMonths(1)
-    }
-    [pscustomobject]@{
-        Total          = $total
-        From           = $first.ToString('yyyy-MM-dd')
-        To             = $last.ToString('yyyy-MM-dd')
-        ByCategory     = @($byCategory)
-        ByProductGroup = @($byProductGroup)
-        ByMonth        = @($byMonth)
-        CasesWithBatch = $withBatch.Count
-        SharedBatches  = @($sharedBatches)
-    }
+function Get-CaseFolder {
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$CaseId)
+    Join-Path $Config.Paths.CaseFolders $CaseId
 }
 
-function Get-SharedBatchNote {
-    <# Sentence shown instead of the shared-batch table when there is nothing to list. #>
-    param([Parameter(Mandatory)]$Statistics)
-    if ($Statistics.CasesWithBatch -eq 0) { return 'No batch numbers in the input.' }
-    if (@($Statistics.SharedBatches).Count -eq 0) { return "No batch occurs in more than one case ($($Statistics.CasesWithBatch) of $($Statistics.Total) cases have a batch number)." }
+function Get-ReportTypeMarker {
+    <#
+      The report type of a case comes from an empty marker file in its case
+      folder (by default short.txt or long.txt). Returns 'Short', 'Long' or $null.
+      Both markers at once is an error.
+    #>
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$CaseId)
+    $folder = Get-CaseFolder $Config $CaseId
+    $found = @(foreach ($type in $script:ReportTypes) {
+            if (Test-Path -LiteralPath (Join-Path $folder $Config.Settings.Reports.$type.Marker) -PathType Leaf) { $type }
+        })
+    if ($found.Count -gt 1) {
+        throw "Case folder of $CaseId holds both $($Config.Settings.Reports.Short.Marker) and $($Config.Settings.Reports.Long.Marker). Keep exactly one."
+    }
+    if ($found.Count -eq 1) { return $found[0] }
     $null
 }
 
-# ---------------------------------------------------------------- documents and uploads
+function Find-ApprovedReport {
+    <# Path of an approved report for this case under Report.OutputPath, or $null. #>
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$CaseId)
+    $out = $Config.Paths.Output
+    if (-not (Test-Path -LiteralPath $out -PathType Container)) { return $null }
+    foreach ($run in @(Get-ChildItem -LiteralPath $out -Directory | Sort-Object Name)) {
+        $audit = Join-Path (Join-Path $run.FullName $CaseId) 'audit.json'
+        if (-not (Test-Path -LiteralPath $audit -PathType Leaf)) { continue }
+        $status = $null
+        try { $status = (Read-JsonFile $audit).status } catch { $status = $null }
+        if ($status -eq 'APPROVED') { return (Split-Path -Parent $audit) }
+    }
+    $null
+}
+
+function Select-DossierCases {
+    <#
+      Decides which cases get a report in this run.
+      Without -CaseId: every case whose status is listed in Selection.OpenStatuses.
+      With -CaseId: exactly these cases, whatever their status.
+      A selected case is skipped when its case folder has no report type marker
+      or when an approved report for it already exists. Returns one entry per
+      selected case with Type and SkipReason (empty when the case is drafted).
+    #>
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][object[]]$Cases, [string[]]$CaseId)
+    if ($CaseId) {
+        $unknown = @($CaseId | Where-Object { @($Cases | ForEach-Object { $_.CaseId }) -notcontains $_ })
+        if ($unknown.Count) { throw "Case ID not found in the complaint list: $($unknown -join ', ')" }
+        $chosen = @($Cases | Where-Object { $CaseId -contains $_.CaseId })
+    } else {
+        $open = @(@(Get-ConfigValue (Get-ConfigValue $Config.Settings 'Selection') 'OpenStatuses') | Where-Object { $_ })
+        if ($open.Count -eq 0) { $open = @('Open') }
+        $chosen = @($Cases | Where-Object { $open -contains $_.Status })
+    }
+    foreach ($case in $chosen) {
+        $type = $null
+        $reason = ''
+        try { $type = Get-ReportTypeMarker -Config $Config -CaseId $case.CaseId } catch { $reason = $_.Exception.Message }
+        if (-not $reason -and -not $type) {
+            $reason = "no report type marker ($($Config.Settings.Reports.Short.Marker) or $($Config.Settings.Reports.Long.Marker)) in the case folder"
+        }
+        if (-not $reason) {
+            $approved = Find-ApprovedReport -Config $Config -CaseId $case.CaseId
+            if ($approved) { $reason = "an approved report already exists: $(Get-RelativeDisplayPath $Config.Root $approved -FullPathOutside)" }
+        }
+        [pscustomobject]@{ Case = $case; Type = $type; SkipReason = $reason }
+    }
+}
+
+# ---------------------------------------------------------------- similar complaints
+
+function Get-SimilarComplaints {
+    <#
+      Facts the tool computes for one case from the whole complaint list, so the
+      model does not have to count:
+      - other cases with the same batch (whole list)
+      - other cases with the same product group and category, received in the
+        LookbackMonths before the case (up to and including its received date),
+        and how many of them fall into the last RecentDays
+    #>
+    param(
+        [Parameter(Mandatory)]$Case,
+        [Parameter(Mandatory)][object[]]$Cases,
+        [int]$LookbackMonths = 12,
+        [int]$RecentDays = 30,
+        # Ascending thresholds: the level of the highest MinCases that the count reaches.
+        [object[]]$FrequencyLevels = @(
+            [pscustomobject]@{ MinCases = 0; Level = 'rare' },
+            [pscustomobject]@{ MinCases = 1; Level = 'occasional' },
+            [pscustomobject]@{ MinCases = 3; Level = 'frequent' },
+            [pscustomobject]@{ MinCases = 6; Level = 'very frequent' })
+    )
+    $others = @($Cases | Where-Object { $_.CaseId -ne $Case.CaseId })
+    $batch = ([string](Get-ConfigValue $Case 'Batch')).Trim()
+    $sameBatch = @()
+    if ($batch) { $sameBatch = @($others | Where-Object { ([string](Get-ConfigValue $_ 'Batch')).Trim() -eq $batch }) }
+    $from = $Case.ReceivedDate.AddMonths(-$LookbackMonths)
+    $recentFrom = $Case.ReceivedDate.AddDays(-($RecentDays - 1))
+    $group = ([string](Get-ConfigValue $Case 'ProductGroup')).Trim()
+    $sameKind = @($others | Where-Object {
+            ([string](Get-ConfigValue $_ 'ProductGroup')).Trim() -eq $group -and $_.Category -eq $Case.Category -and
+            $_.ReceivedDate -gt $from -and $_.ReceivedDate -le $Case.ReceivedDate
+        })
+    $recent = @($sameKind | Where-Object { $_.ReceivedDate -ge $recentFrom })
+    $level = ''
+    foreach ($step in @($FrequencyLevels | Sort-Object { [int]$_.MinCases })) { if ($sameKind.Count -ge [int]$step.MinCases) { $level = [string]$step.Level } }
+    if (-not $level) { throw 'SimilarComplaints.FrequencyLevels must start at MinCases 0.' }
+    $summary = { param($c) [pscustomobject][ordered]@{ CaseId = $c.CaseId; ReceivedDate = $c.ReceivedDate.ToString('yyyy-MM-dd'); Category = $c.Category; ProductGroup = (Get-ConfigValue $c 'ProductGroup'); Batch = (Get-ConfigValue $c 'Batch'); Status = $c.Status } }
+    [pscustomobject][ordered]@{
+        ListSize                 = $Cases.Count
+        Batch                    = $batch
+        SameBatch                = @($sameBatch | ForEach-Object { & $summary $_ })
+        LookbackMonths           = $LookbackMonths
+        LookbackFrom             = $from.AddDays(1).ToString('yyyy-MM-dd')
+        LookbackTo               = $Case.ReceivedDate.ToString('yyyy-MM-dd')
+        SameProductGroupCategory = @($sameKind | ForEach-Object { & $summary $_ })
+        RecentDays               = $RecentDays
+        RecentCount              = $recent.Count
+        FrequencyLevel           = $level
+    }
+}
+
+function Get-SimilarComplaintSentences {
+    <# The similar-complaint facts as plain sentences, used in the prompt and in the report. #>
+    param([Parameter(Mandatory)]$Case, [Parameter(Mandatory)]$Similar)
+    $group = [string](Get-ConfigValue $Case 'ProductGroup')
+    if (-not $group) { $group = '(no product group)' }
+    $count = { param($n) if ($n -eq 0) { 'no other case' } elseif ($n -eq 1) { '1 other case' } else { "$n other cases" } }
+    $lines = @()
+    $b = @($Similar.SameBatch).Count
+    if (-not $Similar.Batch) { $lines += 'Same batch: the case has no batch number.' }
+    elseif ($b -eq 0) { $lines += "Same batch: no other case in the complaint list has batch $($Similar.Batch)." }
+    else {
+        $verb = 'has'
+        if ($b -gt 1) { $verb = 'have' }
+        $lines += "Same batch: $(& $count $b) in the complaint list $verb batch $($Similar.Batch): $((@($Similar.SameBatch | ForEach-Object { $_.CaseId })) -join ', ')."
+    }
+    $n = @($Similar.SameProductGroupCategory).Count
+    $recent = ''
+    if ($n -gt 0 -and $Similar.RecentCount -eq 0) { $recent = "; none of them in the last $($Similar.RecentDays) days" }
+    elseif ($n -gt 0) { $recent = "; $($Similar.RecentCount) of them in the last $($Similar.RecentDays) days" }
+    $lines += "Same product group and category ($group, $($Case.Category)): $(& $count $n) received from $($Similar.LookbackFrom) to $($Similar.LookbackTo), the $($Similar.LookbackMonths) months up to this case$recent."
+    $lines += "Frequency level: $($Similar.FrequencyLevel) (from the number of other cases with the same product group and category in these $($Similar.LookbackMonths) months)."
+    $lines += "The complaint list holds $($Similar.ListSize) cases in total."
+    $lines
+}
+
+# ---------------------------------------------------------------- case documents and uploads
 
 function Protect-PromptText {
     <# Masks e-mail addresses and phone numbers. This is not anonymisation. #>
@@ -378,42 +502,50 @@ function Protect-PromptText {
     [regex]::Replace($Text, '(?<![\w-])(\+|0)\d[\d /-]{6,}\d', '[phone removed]')
 }
 
+function Get-MarkerNames {
+    param([Parameter(Mandatory)]$Config)
+    @($script:ReportTypes | ForEach-Object { ([string]$Config.Settings.Reports.$_.Marker).ToLowerInvariant() })
+}
+
 function Get-CaseDocuments {
-    <# Text documents from <Documents.Path>/<CaseId>/ that go into the prompt. #>
-    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][object[]]$Cases)
-    $root = $Config.Paths.Documents
-    if (-not $root) { return @() }
-    if (-not (Test-Path -LiteralPath $root -PathType Container)) { throw "Configured documents folder not found: $root" }
-    $extensions = @($Config.Settings.Documents.Extensions | ForEach-Object { $_.ToLowerInvariant() })
+    <# Text files from the case folder whose content goes into the prompt. Marker files are left out. #>
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$CaseId)
+    $folder = Get-CaseFolder $Config $CaseId
+    if (-not (Test-Path -LiteralPath $folder -PathType Container)) { return @() }
+    $settings = $Config.Settings.CaseFolders
+    $extensions = @(@(Get-ConfigValue $settings 'TextExtensions') | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
+    $markers = Get-MarkerNames $Config
     $max = 4000
-    if ($null -ne (Get-ConfigValue $Config.Settings.Documents 'MaxCharsPerDocument')) { $max = [int]$Config.Settings.Documents.MaxCharsPerDocument }
-    foreach ($case in $Cases) {
-        $folder = Join-Path $root $case.CaseId
-        if (-not (Test-Path -LiteralPath $folder -PathType Container)) { continue }
-        foreach ($file in @(Get-ChildItem -LiteralPath $folder -File | Where-Object { $extensions -contains $_.Extension.ToLowerInvariant() } | Sort-Object Name)) {
-            $text = Read-Utf8File $file.FullName
-            $truncated = $false
-            if ($text.Length -gt $max) { $text = $text.Substring(0, $max); $truncated = $true }
-            [pscustomobject]@{ CaseId = $case.CaseId; Name = $file.Name; Path = $file.FullName; Text = $text.Trim(); Truncated = $truncated }
-        }
+    if ($null -ne (Get-ConfigValue $settings 'MaxCharsPerDocument')) { $max = [int]$settings.MaxCharsPerDocument }
+    foreach ($file in @(Get-ChildItem -LiteralPath $folder -File | Where-Object {
+                $extensions -contains $_.Extension.ToLowerInvariant() -and $markers -notcontains $_.Name.ToLowerInvariant() -and $_.Name -notlike '~$*'
+            } | Sort-Object Name)) {
+        $text = Read-Utf8File $file.FullName
+        $truncated = $false
+        if ($text.Length -gt $max) { $text = $text.Substring(0, $max); $truncated = $true }
+        [pscustomobject]@{ CaseId = $CaseId; Name = $file.Name; Path = $file.FullName; Text = $text.Trim(); Truncated = $truncated }
     }
 }
 
 function Get-UploadFiles {
     <#
-      Files from Copilot.Upload.Path that the live run attaches to the chat.
-      Fails closed on empty files, oversize files or too many files.
+      Files that the live run attaches to the Copilot chat for one case:
+      <Copilot.Upload.Path>/<case id>/, or the case folder when Upload.Path is empty.
+      Only Copilot.Upload.Extensions; marker files are left out. Fails closed on
+      empty files, oversize files or too many files.
     #>
-    param([Parameter(Mandatory)]$Config)
-    $dir = $Config.Paths.Upload
-    if (-not $dir) { return @() }
-    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { throw "Configured upload folder not found: $dir" }
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)][string]$CaseId)
+    $dir = Get-CaseFolder $Config $CaseId
+    if ($Config.Paths.Upload) { $dir = Join-Path $Config.Paths.Upload $CaseId }
+    if (-not (Test-Path -LiteralPath $dir -PathType Container)) { return @() }
     $upload = $Config.Settings.Copilot.Upload
     $extensions = @($upload.Extensions | ForEach-Object { $_.ToLowerInvariant() })
+    $markers = Get-MarkerNames $Config
     $files = @(Get-ChildItem -LiteralPath $dir -File | Where-Object {
-            $extensions -contains $_.Extension.ToLowerInvariant() -and $_.Name -notlike '~$*' -and $_.Name -notlike '.*'
+            $extensions -contains $_.Extension.ToLowerInvariant() -and $markers -notcontains $_.Name.ToLowerInvariant() -and
+            $_.Name -notlike '~$*' -and $_.Name -notlike '.*'
         } | Sort-Object Name)
-    if ($files.Count -gt [int]$upload.MaxFiles) { throw "Upload folder holds $($files.Count) files; Copilot.Upload.MaxFiles allows $($upload.MaxFiles)." }
+    if ($files.Count -gt [int]$upload.MaxFiles) { throw "Upload folder of $CaseId holds $($files.Count) files; Copilot.Upload.MaxFiles allows $($upload.MaxFiles)." }
     foreach ($file in $files) {
         if ($file.Length -le 0) { throw "Upload file is empty: $($file.Name)" }
         if ($file.Length -gt ([double]$upload.MaxFileSizeMB * 1MB)) { throw "Upload file is larger than $($upload.MaxFileSizeMB) MB: $($file.Name)" }
@@ -433,43 +565,84 @@ function Format-MarkdownTable {
     $lines -join "`n"
 }
 
-function New-DossierPrompt {
+function Get-RequiredStatements {
+    <#
+      Sentences the answer must contain word for word:
+      - Reports.<type>.FrequencyStatement with {LEVEL} replaced by the frequency
+        level the tool computed (the short report opens its section 2 with it)
+      - Reports.<type>.NoSampleStatement when the complaint list says that no
+        returned sample was received
+    #>
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$Case, [Parameter(Mandatory)][string]$Type, $Similar)
+    $settings = $Config.Settings.Reports.$Type
+    $frequency = [string](Get-ConfigValue $settings 'FrequencyStatement')
+    if ($frequency -and $null -ne $Similar) { $frequency.Replace('{LEVEL}', [string]$Similar.FrequencyLevel) }
+    $statement = [string](Get-ConfigValue $settings 'NoSampleStatement')
+    $received = ([string](Get-ConfigValue $Case 'SampleReceived')).Trim()
+    if ($statement -and $received -match '^(?i)(no|n|false|0)$') { $statement }
+}
+
+function Get-CaseRecordRows {
+    param([Parameter(Mandatory)]$Case, [bool]$Mask = $true)
+    $description = ($Case.Description -replace '\s+', ' ')
+    if ($Mask) { $description = Protect-PromptText $description }
+    @(
+        , @('Case ID', $Case.CaseId)
+        , @('Received', $Case.ReceivedDate.ToString('yyyy-MM-dd'))
+        , @('Category', $Case.Category)
+        , @('Product group', (Get-ConfigValue $Case 'ProductGroup'))
+        , @('Batch', (Get-ConfigValue $Case 'Batch'))
+        , @('Severity', (Get-ConfigValue $Case 'Severity'))
+        , @('Status', (Get-ConfigValue $Case 'Status'))
+        , @('Sample received', (Get-ConfigValue $Case 'SampleReceived'))
+        , @('Description', $description)
+    )
+}
+
+function New-CasePrompt {
+    <# Fills the prompt template of the report type with the data of one case. #>
     param(
         [Parameter(Mandatory)][string]$Template,
-        [Parameter(Mandatory)][object[]]$Cases,
-        [Parameter(Mandatory)]$Statistics,
+        [Parameter(Mandatory)]$Case,
+        [Parameter(Mandatory)]$Similar,
         [object[]]$Documents = @(),
         [string[]]$Attachments = @(),
+        [string[]]$RequiredStatements = @(),
+        [string[]]$ProcessFacts = @(),
         [bool]$Mask = $true
     )
     $clean = { param($t) if ($Mask) { Protect-PromptText $t } else { $t } }
-    $stats = "Cases by category:`n" + (Format-MarkdownTable @('Category', 'Count', 'Share %') @($Statistics.ByCategory | ForEach-Object { , @($_.Category, $_.Count, $_.Share.ToString('0.0', [Globalization.CultureInfo]::InvariantCulture)) }))
-    $stats += "`n`nCases by product group:`n" + (Format-MarkdownTable @('Product group', 'Count', 'Share %') @($Statistics.ByProductGroup | ForEach-Object { , @($_.ProductGroup, $_.Count, $_.Share.ToString('0.0', [Globalization.CultureInfo]::InvariantCulture)) }))
-    $stats += "`n`nCases by month:`n" + (Format-MarkdownTable @('Month', 'Count') @($Statistics.ByMonth | ForEach-Object { , @($_.Month, $_.Count) }))
-    $batchNote = Get-SharedBatchNote $Statistics
-    if ($batchNote) { $stats += "`n`nBatches with more than one case: $batchNote" }
-    else { $stats += "`n`nBatches with more than one case:`n" + (Format-MarkdownTable @('Batch', 'Count', 'Case IDs') @($Statistics.SharedBatches | ForEach-Object { , @($_.Batch, $_.Count, ($_.CaseIds -join ', ')) })) }
-    $caseTable = Format-MarkdownTable @('Case ID', 'Received', 'Category', 'Product group', 'Batch', 'Severity', 'Status', 'Description') @($Cases | ForEach-Object {
-            , @($_.CaseId, $_.ReceivedDate.ToString('yyyy-MM-dd'), $_.Category, (Get-ConfigValue $_ 'ProductGroup'), (Get-ConfigValue $_ 'Batch'), $_.Severity, $_.Status, (& $clean (($_.Description -replace '\s+', ' '))))
-        })
+    $record = Format-MarkdownTable @('Field', 'Value') (Get-CaseRecordRows $Case $Mask)
+    $similarText = (@(Get-SimilarComplaintSentences $Case $Similar) | ForEach-Object { "- $_" }) -join "`n"
+    $listed = @(@($Similar.SameBatch) + @($Similar.SameProductGroupCategory) | Sort-Object CaseId -Unique)
+    if ($listed.Count) {
+        $similarText += "`n`n" + (Format-MarkdownTable @('Case ID', 'Received', 'Category', 'Product group', 'Batch', 'Status') @($listed | ForEach-Object {
+                    , @($_.CaseId, $_.ReceivedDate, $_.Category, $_.ProductGroup, $_.Batch, $_.Status)
+                }))
+    }
     $docText = 'No case documents.'
     if (@($Documents).Count) {
         $docText = (@($Documents | ForEach-Object {
                     $note = ''
                     if ($_.Truncated) { $note = ' (truncated)' }
-                    "--- Document $($_.Name) for case $($_.CaseId)$note ---`n" + (& $clean $_.Text)
+                    "--- Document $($_.Name)$note ---`n" + (& $clean $_.Text)
                 }) -join "`n`n")
     }
     $attachText = 'None.'
     if (@($Attachments).Count) { $attachText = (@($Attachments | ForEach-Object { "- $_" }) -join "`n") }
+    $statementText = 'None for this case.'
+    if (@($RequiredStatements).Count) { $statementText = (@($RequiredStatements | ForEach-Object { "- $_" }) -join "`n") }
+    $factText = 'None.'
+    if (@($ProcessFacts).Count) { $factText = (@($ProcessFacts | ForEach-Object { "- $_" }) -join "`n") }
 
     $values = @{
-        '{{PERIOD}}'      = "$($Statistics.From) to $($Statistics.To)"
-        '{{CASE_COUNT}}'  = [string]$Statistics.Total
-        '{{STATISTICS}}'  = $stats
-        '{{CASES}}'       = $caseTable
-        '{{DOCUMENTS}}'   = $docText
-        '{{ATTACHMENTS}}' = $attachText
+        '{{CASE_ID}}'             = $Case.CaseId
+        '{{REQUIRED_STATEMENTS}}' = $statementText
+        '{{PROCESS_FACTS}}'       = $factText
+        '{{CASE}}'                = $record
+        '{{SIMILAR}}'             = $similarText
+        '{{DOCUMENTS}}'           = $docText
+        '{{ATTACHMENTS}}'         = $attachText
     }
     $prompt = $Template.Replace("`r`n", "`n")
     foreach ($key in $values.Keys) { $prompt = $prompt.Replace($key, $values[$key]) }
@@ -480,16 +653,43 @@ function New-DossierPrompt {
 
 # ---------------------------------------------------------------- response checks
 
-function Test-DossierResponse {
+function ConvertTo-SectionHeadings {
     <#
-      Automated checks on the AI response. They do not replace the human review;
-      the results are printed in the report and stored in the audit log.
+      The copy button of the Copilot app copies the rendered answer as plain
+      text, without Markdown marks. A line that holds only a section name
+      (optionally followed by a colon) is turned back into a "## " heading.
+      response.md keeps the answer as copied; checks and report use this form.
     #>
-    param([string]$Response, [string]$Prompt, [string[]]$RequiredSections, [string[]]$KnownCaseIds)
+    param([AllowEmptyString()][string]$Response, [string[]]$Sections)
+    $lines = foreach ($line in ($Response -split "`r?`n")) {
+        $name = $line.Trim().TrimEnd(':').Trim()
+        if ($name -and $line.Trim() -notmatch '^#' -and $Sections -contains $name) { "## $name" } else { $line }
+    }
+    $lines -join "`n"
+}
+
+function Test-ReportResponse {
+    <#
+      Automated checks on the AI answer for one case. They do not replace the
+      human review; the results are printed in the report and stored in audit.json.
+    #>
+    param(
+        [AllowEmptyString()][string]$Response,
+        [string]$Prompt,
+        [string]$CaseId,
+        [string[]]$RequiredSections,
+        [string[]]$KnownCaseIds,
+        [string[]]$RequiredStatements = @(),
+        # When set, the answer must end with one of these sentences.
+        [string[]]$ClassificationStatements = @()
+    )
     $checks = New-Object System.Collections.Generic.List[object]
     $checks.Add([pscustomobject]@{ Name = 'Response is not empty'; Passed = -not [string]::IsNullOrWhiteSpace($Response); Detail = "$($Response.Length) characters" })
-    $echo = (Get-TextSha256 $Response.Trim()) -eq (Get-TextSha256 $Prompt.Trim())
-    $checks.Add([pscustomobject]@{ Name = 'Response differs from prompt'; Passed = -not $echo; Detail = '' })
+    $echo = (Get-TextSha256 $Response.Trim()) -eq (Get-TextSha256 ([string]$Prompt).Trim())
+    $leaked = @($script:PromptHeadings | Where-Object { $Response.Contains($_) })
+    $detail = ''
+    if ($echo) { $detail = 'response equals the prompt' } elseif ($leaked.Count) { $detail = 'contains prompt heading: ' + ($leaked -join ', ') }
+    $checks.Add([pscustomobject]@{ Name = 'Response is not a copy of the prompt'; Passed = (-not $echo -and $leaked.Count -eq 0); Detail = $detail })
 
     $headings = @([regex]::Matches($Response, '(?m)^#{1,6}\s+(.+?)\s*$') | ForEach-Object { $_.Groups[1].Value.Trim() })
     $missing = @($RequiredSections | Where-Object { $headings -notcontains $_ })
@@ -500,10 +700,28 @@ function Test-DossierResponse {
     # A bracketed token with a letter, a digit and a hyphen counts as a case ID
     # citation, e.g. [SYN-2026-004]. Footnotes like [1] and links are ignored.
     $cited = @([regex]::Matches($Response, '\[([A-Za-z][A-Za-z0-9_./]*-[A-Za-z0-9_./-]*\d[A-Za-z0-9_./-]*)\](?!\()') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    $own = $cited -contains $CaseId
+    $detail = "[$CaseId] cited"
+    if (-not $own) { $detail = "[$CaseId] not cited" }
+    $checks.Add([pscustomobject]@{ Name = 'Report cites its own case ID'; Passed = $own; Detail = $detail })
     $unknown = @($cited | Where-Object { $KnownCaseIds -notcontains $_ })
-    $detail = "$($cited.Count) case IDs cited, all found in the input"
-    if ($unknown.Count) { $detail = 'not in the input: ' + ($unknown -join ', ') }
+    $detail = "$($cited.Count) case IDs cited, all in the complaint list"
+    if ($unknown.Count) { $detail = 'not in the complaint list: ' + ($unknown -join ', ') }
     $checks.Add([pscustomobject]@{ Name = 'Cited case IDs exist'; Passed = ($unknown.Count -eq 0); Detail = $detail })
+
+    $absent = @($RequiredStatements | Where-Object { $Response.IndexOf($_, [StringComparison]::OrdinalIgnoreCase) -lt 0 })
+    $detail = 'none required for this case'
+    if (@($RequiredStatements).Count) { $detail = 'present: ' + ($RequiredStatements -join ' ') }
+    if ($absent.Count) { $detail = 'missing: ' + ($absent -join ' ') }
+    $checks.Add([pscustomobject]@{ Name = 'Required statements present'; Passed = ($absent.Count -eq 0); Detail = $detail })
+
+    if (@($ClassificationStatements).Count) {
+        $end = $Response.TrimEnd()
+        $match = @($ClassificationStatements | Where-Object { $end.EndsWith($_, [StringComparison]::OrdinalIgnoreCase) })
+        $detail = 'ends with: ' + ($match -join '')
+        if (-not $match.Count) { $detail = 'last sentence is none of: ' + ($ClassificationStatements -join ' / ') }
+        $checks.Add([pscustomobject]@{ Name = 'Conclusion ends with a classification'; Passed = ($match.Count -gt 0); Detail = $detail })
+    }
     $checks.ToArray()
 }
 
@@ -574,7 +792,7 @@ function ConvertFrom-MarkdownToWordXml {
             $style = 'Heading3'
             if ($Matches[1].Length -ge 3) { $style = 'Heading4' }
             [void]$out.Append((New-WParagraph $Matches[2] -Style $style))
-        } elseif ($trim -match '^[-*]\s+(.+)$') {
+        } elseif ($trim -match ('^[-*' + [char]0x2022 + ']\s+(.+)$')) {
             & $flush
             [void]$out.Append((New-WParagraph ([string][char]0x2022 + ' ' + $Matches[1]) -Indent 360))
         } elseif ($trim -match '^(\d+)[.)]\s+(.+)$') {
@@ -641,17 +859,20 @@ function Update-ZipEntries {
     Move-Item -LiteralPath $tmp -Destination $Destination -Force
 }
 
-function New-DossierReport {
-    <# Fills the report template: banner in the header, generated body at the anchor. #>
+function New-CaseReport {
+    <# Fills the report template for one case: banner in the header, generated body at the anchor. #>
     param(
         [Parameter(Mandatory)][string]$TemplatePath,
         [Parameter(Mandatory)][string]$OutputPath,
         [Parameter(Mandatory)][string]$Title,
         [Parameter(Mandatory)]$Run,
-        [Parameter(Mandatory)][object[]]$Cases,
-        [Parameter(Mandatory)]$Statistics,
+        [Parameter(Mandatory)]$Case,
+        [Parameter(Mandatory)]$Similar,
+        [object[]]$Documents = @(),
+        [string[]]$Uploads = @(),
         [Parameter(Mandatory)][string]$Response,
-        [Parameter(Mandatory)][object[]]$Checks
+        [Parameter(Mandatory)][object[]]$Checks,
+        [bool]$Mask = $true
     )
     $m = $script:Markers
     $body = New-Object System.Text.StringBuilder
@@ -662,50 +883,50 @@ function New-DossierReport {
     }
     [void]$body.Append((New-WParagraph $Title -Style 'Title'))
     [void]$body.Append((New-WTable @('Field', 'Value') @(
+                , @('Case ID', $Case.CaseId)
+                , @('Report type', $Run.ReportType)
                 , @('Run ID', $Run.RunId)
                 , @('Generated (UTC)', $Run.GeneratedAt)
                 , @('Mode', $Run.ModeText)
                 , @('Model', $Run.Model)
-                , @('Cases', "$($Statistics.Total) ($($Statistics.From) to $($Statistics.To))")
-                , @('Workbook SHA-256', $Run.WorkbookSha256)
+                , @('Complaint list SHA-256', $Run.WorkbookSha256)
                 , @('Prompt SHA-256', $Run.PromptSha256)
                 , @('Response SHA-256', $Run.ResponseSha256)
             )))
 
-    [void]$body.Append((New-WParagraph '1 Statistics' -Style 'Heading1'))
-    [void]$body.Append((New-WParagraph 'Cases by category' -Style 'Heading2'))
-    [void]$body.Append((New-WTable @('Category', 'Count', 'Share %') @($Statistics.ByCategory | ForEach-Object { , @($_.Category, $_.Count, $_.Share.ToString('0.0', [Globalization.CultureInfo]::InvariantCulture)) })))
-    [void]$body.Append((New-WParagraph 'Cases by product group' -Style 'Heading2'))
-    [void]$body.Append((New-WTable @('Product group', 'Count', 'Share %') @($Statistics.ByProductGroup | ForEach-Object { , @($_.ProductGroup, $_.Count, $_.Share.ToString('0.0', [Globalization.CultureInfo]::InvariantCulture)) })))
-    [void]$body.Append((New-WParagraph 'Cases by month' -Style 'Heading2'))
-    $peak = ($Statistics.ByMonth | Measure-Object Count -Maximum).Maximum
-    [void]$body.Append((New-WTable @('Month', 'Count', 'Trend') @($Statistics.ByMonth | ForEach-Object {
-                    $bar = ''
-                    if ($peak -gt 0) { $bar = ([string][char]0x2588) * [int][math]::Round(10.0 * $_.Count / $peak) }
-                    , @($_.Month, $_.Count, $bar)
-                }) -ColumnColor @{ 2 = '9E9E9E' }))
-    [void]$body.Append((New-WParagraph 'Batches with more than one case' -Style 'Heading2'))
-    $batchNote = Get-SharedBatchNote $Statistics
-    if ($batchNote) { [void]$body.Append((New-WParagraph $batchNote)) }
-    else { [void]$body.Append((New-WTable @('Batch', 'Count', 'Case IDs') @($Statistics.SharedBatches | ForEach-Object { , @($_.Batch, $_.Count, ($_.CaseIds -join ', ')) }))) }
+    [void]$body.Append((New-WParagraph '1 Complaint record' -Style 'Heading1'))
+    [void]$body.Append((New-WParagraph 'From the complaint list. Contact data in the description is masked.' -Style 'Note'))
+    [void]$body.Append((New-WTable @('Field', 'Value') @(Get-CaseRecordRows $Case $Mask | Select-Object -Skip 1)))
 
-    [void]$body.Append((New-WParagraph '2 Case list' -Style 'Heading1'))
-    [void]$body.Append((New-WTable @('Case ID', 'Received', 'Category', 'Product group', 'Batch', 'Severity', 'Status') @($Cases | ForEach-Object { , @($_.CaseId, $_.ReceivedDate.ToString('yyyy-MM-dd'), $_.Category, (Get-ConfigValue $_ 'ProductGroup'), (Get-ConfigValue $_ 'Batch'), $_.Severity, $_.Status) })))
+    [void]$body.Append((New-WParagraph '2 Similar complaints' -Style 'Heading1'))
+    [void]$body.Append((New-WParagraph 'Computed by the tool from the complaint list, not by the model.' -Style 'Note'))
+    foreach ($line in Get-SimilarComplaintSentences $Case $Similar) { [void]$body.Append((New-WParagraph ([string][char]0x2022 + ' ' + $line) -Indent 360)) }
+    $listed = @(@($Similar.SameBatch) + @($Similar.SameProductGroupCategory) | Sort-Object CaseId -Unique)
+    if ($listed.Count) {
+        [void]$body.Append((New-WTable @('Case ID', 'Received', 'Category', 'Product group', 'Batch', 'Status') @($listed | ForEach-Object {
+                        , @($_.CaseId, $_.ReceivedDate, $_.Category, $_.ProductGroup, $_.Batch, $_.Status)
+                    })))
+    }
 
-    [void]$body.Append((New-WParagraph '3 AI-drafted assessment' -Style 'Heading1'))
+    [void]$body.Append((New-WParagraph '3 Case documents' -Style 'Heading1'))
+    $rows = @(@($Documents | ForEach-Object { , @($_.Name, 'text inserted into the prompt') }) + @($Uploads | ForEach-Object { , @($_, 'uploaded to the Copilot chat') }))
+    if ($rows.Count) { [void]$body.Append((New-WTable @('File', 'Use') $rows)) }
+    else { [void]$body.Append((New-WParagraph 'The case folder holds no documents for the prompt and no files to upload.')) }
+
+    [void]$body.Append((New-WParagraph '4 Report text (AI draft)' -Style 'Heading1'))
     [void]$body.Append((New-WParagraph $Run.ResponseNote -Style 'Note'))
     [void]$body.Append((ConvertFrom-MarkdownToWordXml $Response))
 
-    [void]$body.Append((New-WParagraph '4 Automated checks' -Style 'Heading1'))
+    [void]$body.Append((New-WParagraph '5 Automated checks' -Style 'Heading1'))
     [void]$body.Append((New-WTable @('Check', 'Result', 'Detail') @($Checks | ForEach-Object {
                     $result = 'FAIL'
                     if ($_.Passed) { $result = 'pass' }
                     , @($_.Name, $result, $_.Detail)
                 })))
 
-    [void]$body.Append((New-WParagraph '5 Review and approval' -Style 'Heading1'))
-    [void]$body.Append((New-WParagraph 'This report is a draft until a reviewer has checked every statement in section 3 against the case records and approves it with Approve-ComplaintDossier.ps1. The approval (typed reviewer name and time) and the file hashes are recorded in audit.json. A typed name is not an electronic signature.'))
-    [void]$body.Append((New-WParagraph 'Approval is refused while an automated check in section 4 has failed. A reviewer can accept failed checks only by giving a written justification, which is printed here and stored in audit.json as a documented exception.'))
+    [void]$body.Append((New-WParagraph '6 Review and approval' -Style 'Heading1'))
+    [void]$body.Append((New-WParagraph "This report is a draft until a reviewer has checked every statement in section 4 against the case file of $($Case.CaseId) and approves it with Approve-ComplaintDossier.ps1. The approval (typed reviewer name and time) and the file hashes are recorded in the audit.json of this report. A typed name is not an electronic signature."))
+    [void]$body.Append((New-WParagraph 'Approval is refused while an automated check in section 5 has failed. A reviewer can accept failed checks only by giving a written justification, which is printed here and stored in audit.json as a documented exception.'))
     foreach ($key in 'Status', 'Reviewer', 'ApprovedAt', 'Comment', 'Exception') { [void]$body.Append((New-WParagraph $m[$key])) }
 
     $bodyXml = $body.ToString()
@@ -768,9 +989,9 @@ function New-ZipPackage {
 function Invoke-CopilotHandoff {
     <#
       Runs src/Copilot/Invoke-CopilotRoundtrip.ps1 in Windows PowerShell 5.1
-      (STA, .NET Framework UI Automation). The child opens a new chat, selects
-      the configured model (or aborts), uploads the files, sends the prompt,
-      waits for the answer and copies it into $ResponseFile.
+      (STA, .NET Framework UI Automation) for one case. The child opens a new
+      chat, selects the configured model (or aborts), uploads the files of the
+      case, sends the prompt, waits for the answer and copies it into $ResponseFile.
     #>
     param(
         [Parameter(Mandatory)]$Config,
@@ -813,27 +1034,184 @@ function Invoke-CopilotHandoff {
     $status
 }
 
+# ---------------------------------------------------------------- one report per case
+
+function Get-ReportFileName {
+    param([Parameter(Mandatory)][string]$CaseId, [Parameter(Mandatory)][string]$Type)
+    "$CaseId-$($Type.ToLowerInvariant())-report-DRAFT.docx"
+}
+
+function New-DossierCaseReport {
+    <#
+      Drafts the report for one selected case into <RunPath>/<case id>/:
+      prompt.txt, case-data.json, response.md, the DRAFT .docx and audit.json.
+      Demo mode copies <Demo.ResponsePath>/<case id>.md instead of asking Copilot.
+    #>
+    param(
+        [Parameter(Mandatory)]$Config,
+        [Parameter(Mandatory)]$Selected,
+        [Parameter(Mandatory)][object[]]$AllCases,
+        [Parameter(Mandatory)][string]$RunId,
+        [Parameter(Mandatory)][string]$RunPath
+    )
+    $case = $Selected.Case
+    $type = $Selected.Type
+    $settings = $Config.Settings.Reports.$type
+    $root = $Config.Root
+    $casePath = Join-Path $RunPath $case.CaseId
+    New-Item -ItemType Directory -Force -Path $casePath | Out-Null
+
+    $events = New-Object System.Collections.Generic.List[object]
+    $addEvent = { param($name, $detail) $events.Add([pscustomobject]@{ atUtc = (Get-UtcStamp); event = $name; detail = $detail }) }
+    $inputs = New-Object System.Collections.Generic.List[object]
+    $addInput = { param($role, $path) $inputs.Add([pscustomobject]@{ role = $role; path = (Get-RelativeDisplayPath $root $path); sha256 = (Get-Sha256 $path) }) }
+    & $addEvent 'case-started' "$($case.CaseId), $($type.ToLowerInvariant()) report, mode=$($Config.Mode.ToLowerInvariant())"
+    & $addInput 'config' $Config.Paths.Config
+    & $addInput 'complaint-list' $Config.Paths.Workbook
+    & $addInput 'prompt-template' $Config.Paths.Prompts.$type
+    & $addInput 'report-template' $Config.Paths.ReportTemplate
+
+    # 1. Case data: row, similar complaints, documents, uploads
+    $lookback = 12
+    $recentDays = 30
+    $similarSettings = Get-ConfigValue $Config.Settings 'SimilarComplaints'
+    if ($null -ne (Get-ConfigValue $similarSettings 'LookbackMonths')) { $lookback = [int]$similarSettings.LookbackMonths }
+    if ($null -ne (Get-ConfigValue $similarSettings 'RecentDays')) { $recentDays = [int]$similarSettings.RecentDays }
+    $levelArgs = @{}
+    if (@(@(Get-ConfigValue $similarSettings 'FrequencyLevels') | Where-Object { $_ }).Count) { $levelArgs.FrequencyLevels = @($similarSettings.FrequencyLevels) }
+    $similar = Get-SimilarComplaints -Case $case -Cases $AllCases -LookbackMonths $lookback -RecentDays $recentDays @levelArgs
+    $documents = @(Get-CaseDocuments -Config $Config -CaseId $case.CaseId)
+    foreach ($doc in $documents) { & $addInput 'case-document' $doc.Path }
+    $uploads = @()
+    if ($Config.Mode -eq 'Live') {
+        $uploads = @(Get-UploadFiles -Config $Config -CaseId $case.CaseId)
+        foreach ($file in $uploads) { & $addInput 'upload' $file.FullName }
+    }
+    $statements = @(Get-RequiredStatements -Config $Config -Case $case -Type $type -Similar $similar)
+    $facts = @(@(Get-ConfigValue $settings 'ProcessFacts') | Where-Object { $_ })
+    $caseDataFile = Join-Path $casePath 'case-data.json'
+    $caseData = [pscustomobject][ordered]@{
+        caseId             = $case.CaseId
+        reportType         = $type.ToLowerInvariant()
+        record             = [pscustomobject][ordered]@{
+            CaseId = $case.CaseId; ReceivedDate = $case.ReceivedDate.ToString('yyyy-MM-dd'); Category = $case.Category
+            ProductGroup = $case.ProductGroup; Batch = $case.Batch; Severity = $case.Severity; Status = $case.Status
+            SampleReceived = $case.SampleReceived; Description = $case.Description
+        }
+        similarComplaints  = $similar
+        requiredStatements = $statements
+        processFacts       = $facts
+        documents          = @($documents | ForEach-Object { $_.Name })
+        uploads            = @($uploads | ForEach-Object { $_.Name })
+    }
+    # JSON with LF line ends, so the hash is the same on every platform.
+    Write-Utf8File $caseDataFile (($caseData | ConvertTo-Json -Depth 6).Replace("`r`n", "`n") + "`n")
+
+    # 2. Prompt
+    $mask = $true
+    if ($null -ne (Get-ConfigValue (Get-ConfigValue $Config.Settings 'Prompt') 'MaskContactData')) { $mask = [bool]$Config.Settings.Prompt.MaskContactData }
+    $prompt = New-CasePrompt -Template (Read-Utf8File $Config.Paths.Prompts.$type) -Case $case -Similar $similar -Documents $documents `
+        -Attachments @($uploads | ForEach-Object { $_.Name }) -RequiredStatements $statements -ProcessFacts $facts -Mask $mask
+    $promptFile = Join-Path $casePath 'prompt.txt'
+    Write-Utf8File $promptFile $prompt
+    & $addEvent 'prompt-built' "$($prompt.Length) characters, $($documents.Count) document(s), $($uploads.Count) upload(s)"
+
+    # 3. Response
+    $responseFile = Join-Path $casePath 'response.md'
+    $copilotStatus = $null
+    if ($Config.Mode -eq 'Demo') {
+        $demoFile = Join-Path $Config.Paths.DemoResponses "$($case.CaseId).md"
+        if (-not (Test-Path -LiteralPath $demoFile -PathType Leaf)) { throw "No prewritten demo answer for $($case.CaseId): $(Get-RelativeDisplayPath $root $demoFile -FullPathOutside)" }
+        & $addInput 'demo-response' $demoFile
+        Write-Utf8File $responseFile (Read-Utf8File $demoFile)
+        $modelText = 'none (demo mode)'
+        $modeText = 'Demo: prewritten sample answer, Copilot not used'
+        $responseNote = "Demo mode: the text below is a prewritten sample answer for the synthetic case $($case.CaseId). It was not produced by Copilot."
+        & $addEvent 'response-received' 'demo answer copied'
+    } else {
+        $cp = $Config.Settings.Copilot
+        $modelText = [string]$cp.PreferredModel
+        if ([string](Get-ConfigValue $cp 'PreferredModelGroup')) { $modelText = "$($cp.PreferredModelGroup) / $modelText" }
+        $modeText = 'Live: Microsoft 365 Copilot desktop app'
+        $responseNote = "Drafted by Microsoft 365 Copilot (configured model: $modelText). Check every statement against the case file."
+        Write-Host "[copilot] $($case.CaseId): handing the prompt to '$($cp.WindowTitle)', model '$modelText', $($uploads.Count) upload(s)"
+        $copilotStatus = Invoke-CopilotHandoff -Config $Config -PromptFile $promptFile -ResponseFile $responseFile -UploadFiles $uploads -RunPath $casePath
+        & $addEvent 'response-received' "copilot, model=$modelText, uploads=$($uploads.Count)"
+    }
+    # Plain-text answers (Copilot copy button) get their section headings back.
+    $response = ConvertTo-SectionHeadings (Read-Utf8File $responseFile) @($settings.RequiredSections)
+
+    # 4. Checks and report
+    $checks = @(Test-ReportResponse -Response $response -Prompt $prompt -CaseId $case.CaseId -RequiredSections @($settings.RequiredSections) `
+            -KnownCaseIds @($AllCases | ForEach-Object { $_.CaseId }) -RequiredStatements $statements `
+            -ClassificationStatements @(@(Get-ConfigValue $settings 'ClassificationStatements') | Where-Object { $_ }))
+    $reportName = Get-ReportFileName $case.CaseId $type
+    $reportFile = Join-Path $casePath $reportName
+    $run = [pscustomobject]@{
+        RunId          = $RunId
+        ReportType     = "$type report"
+        GeneratedAt    = [DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss')
+        ModeText       = $modeText
+        Model          = $modelText
+        ResponseNote   = $responseNote
+        WorkbookSha256 = (Get-Sha256 $Config.Paths.Workbook)
+        PromptSha256   = (Get-Sha256 $promptFile)
+        ResponseSha256 = (Get-Sha256 $responseFile)
+    }
+    New-CaseReport -TemplatePath $Config.Paths.ReportTemplate -OutputPath $reportFile -Title "$($settings.Title) $($case.CaseId)" -Run $run `
+        -Case $case -Similar $similar -Documents $documents -Uploads @($uploads | ForEach-Object { $_.Name }) -Response $response -Checks $checks -Mask $mask
+    & $addEvent 'report-written' $reportName
+
+    # 5. Audit log of this report (SHA-256 hashes)
+    $artifact = { param($name) [pscustomobject]@{ file = $name; sha256 = (Get-Sha256 (Join-Path $casePath $name)) } }
+    $audit = [pscustomobject][ordered]@{
+        schema     = 'complaint-dossier/audit/v3'
+        tool       = [pscustomobject]@{ name = 'Complaint Dossier'; version = (Get-DossierVersion) }
+        runId      = $RunId
+        caseId     = $case.CaseId
+        reportType = $type.ToLowerInvariant()
+        mode       = $Config.Mode.ToLowerInvariant()
+        status     = 'DRAFT'
+        operator   = [pscustomobject]@{ osAccount = [Environment]::UserName; host = 'PowerShell ' + $PSVersionTable.PSVersion.ToString() + ' (' + $PSVersionTable.PSEdition + ')' }
+        model      = [pscustomobject]@{ configured = $modelText; copilot = $copilotStatus }
+        inputs     = $inputs.ToArray()
+        artifacts  = [pscustomobject][ordered]@{
+            caseData = & $artifact 'case-data.json'
+            prompt   = & $artifact 'prompt.txt'
+            response = & $artifact 'response.md'
+            report   = & $artifact $reportName
+        }
+        checks     = @($checks | ForEach-Object { [pscustomobject]@{ name = $_.Name; passed = $_.Passed; detail = $_.Detail } })
+        review     = [pscustomobject]@{ reviewer = $null; approvedAtUtc = $null; comment = $null }
+        events     = $events.ToArray()
+    }
+    $auditFile = Join-Path $casePath 'audit.json'
+    Save-AuditLog $audit $auditFile
+    [pscustomobject]@{ CaseId = $case.CaseId; Type = $type; Path = $casePath; Report = $reportFile; Audit = $auditFile; Checks = $checks }
+}
+
 # ---------------------------------------------------------------- audit and approval
 
 function Save-AuditLog {
     param([Parameter(Mandatory)]$Audit, [Parameter(Mandatory)][string]$Path)
-    # LF line ends on every platform, like statistics.json.
+    # LF line ends on every platform, like case-data.json.
     Write-Utf8File $Path (($Audit | ConvertTo-Json -Depth 10).Replace("`r`n", "`n") + "`n")
 }
 
-function Approve-DossierRun {
+function Approve-DossierReport {
     <#
-      Human approval. Verifies that prompt, response and draft report still match
-      the hashes in audit.json, writes an approved copy of the report without the
-      DRAFT markers, and records reviewer, time and new hash. The draft stays.
+      Human approval of one report. Verifies that case data, prompt, response and
+      draft report still match the hashes in the audit.json of the report folder,
+      writes an approved copy of the report without the DRAFT markers, and records
+      reviewer, time and new hash. The draft stays.
 
-      Approval is refused while any automated response check in audit.json has
-      failed. -AcceptFailedChecks with a non-empty -Justification overrides that;
-      the override is printed in the approved report and stored in audit.json as a
+      Approval is refused while any automated check in audit.json has failed.
+      -AcceptFailedChecks with a non-empty -Justification overrides that; the
+      override is printed in the approved report and stored in audit.json as a
       documented exception.
     #>
     param(
-        [Parameter(Mandatory)][string]$RunPath,
+        [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Reviewer,
         [string]$Comment = '',
         [switch]$AcceptFailedChecks,
@@ -846,28 +1224,32 @@ function Approve-DossierRun {
     if (-not $AcceptFailedChecks -and -not [string]::IsNullOrWhiteSpace($Justification)) {
         throw '-Justification is only used together with -AcceptFailedChecks. Approval refused.'
     }
-    $auditPath = Join-Path $RunPath 'audit.json'
-    if (-not (Test-Path -LiteralPath $auditPath)) { throw "audit.json not found in $RunPath" }
+    $auditPath = Join-Path $Path 'audit.json'
+    if (-not (Test-Path -LiteralPath $auditPath)) {
+        $hint = ''
+        if (Test-Path -LiteralPath (Join-Path $Path 'run.json')) { $hint = ' This is a run folder; approve each report in its case folder, for example <run folder>/<case id>.' }
+        throw "audit.json not found in $Path.$hint"
+    }
     $audit = Read-JsonFile $auditPath
-    if ($audit.status -ne 'DRAFT') { throw "Run $($audit.runId) has status $($audit.status); only DRAFT runs can be approved." }
+    if ($audit.status -ne 'DRAFT') { throw "Report $($audit.caseId) of run $($audit.runId) has status $($audit.status); only DRAFT reports can be approved." }
     if ($audit.PSObject.Properties.Name -notcontains 'checks' -or @($audit.checks).Count -eq 0) {
-        throw "audit.json of run $($audit.runId) records no automated checks. Approval refused."
+        throw "audit.json of $($audit.caseId) records no automated checks. Approval refused."
     }
     $failed = @($audit.checks | Where-Object { $_.passed -ne $true })
     $failedText = @($failed | ForEach-Object {
             if ($_.detail) { "$($_.name) ($($_.detail))" } else { [string]$_.name }
         }) -join '; '
     if ($failed.Count -and -not $AcceptFailedChecks) {
-        throw ("Approval refused: $($failed.Count) automated check(s) failed: $failedText. The run stays DRAFT. " +
-            "Start a new run, or accept the failures as a documented exception with -AcceptFailedChecks -Justification '<reason>'.")
+        throw ("Approval refused: $($failed.Count) automated check(s) failed: $failedText. The report stays DRAFT. " +
+            "Draft it again in a new run, or accept the failures as a documented exception with -AcceptFailedChecks -Justification '<reason>'.")
     }
     if ($AcceptFailedChecks -and -not $failed.Count) {
         throw 'All automated checks passed; -AcceptFailedChecks is not needed. Approval refused.'
     }
 
-    foreach ($name in 'prompt', 'response', 'statistics', 'report') {
+    foreach ($name in 'caseData', 'prompt', 'response', 'report') {
         $artifact = $audit.artifacts.$name
-        $file = Join-Path $RunPath $artifact.file
+        $file = Join-Path $Path $artifact.file
         if (-not (Test-Path -LiteralPath $file)) { throw "Artifact missing: $($artifact.file). Approval refused." }
         $actual = Get-Sha256 $file
         if ($actual -ne $artifact.sha256) { throw "Hash mismatch for $($artifact.file): audit has $($artifact.sha256), file has $actual. The file changed after the run. Approval refused." }
@@ -897,10 +1279,10 @@ function Approve-DossierRun {
         $replace[$m.Exception] = 'Accepted check failures: none (all automated checks passed)'
     }
 
-    $draft = Join-Path $RunPath $audit.artifacts.report.file
+    $draft = Join-Path $Path $audit.artifacts.report.file
     $approvedName = $audit.artifacts.report.file -replace '-DRAFT\.docx$', '.docx'
     if ($approvedName -eq $audit.artifacts.report.file) { $approvedName = [IO.Path]::GetFileNameWithoutExtension($approvedName) + '-approved.docx' }
-    $approved = Join-Path $RunPath $approvedName
+    $approved = Join-Path $Path $approvedName
     $script:markerHits = @{}
     Update-ZipEntries -Source $draft -Destination $approved -Transform {
         param($name, $text)
@@ -931,12 +1313,12 @@ function Approve-DossierRun {
 
     $audit.status = 'APPROVED'
     $audit.review = [pscustomobject]@{
-        reviewer        = $Reviewer
-        approvedAtUtc   = $approvedAt
-        comment         = $Comment
-        osAccount       = [Environment]::UserName
-        draftSha256     = $audit.artifacts.report.sha256
-        exception       = $exception
+        reviewer      = $Reviewer
+        approvedAtUtc = $approvedAt
+        comment       = $Comment
+        osAccount     = [Environment]::UserName
+        draftSha256   = $audit.artifacts.report.sha256
+        exception     = $exception
     }
     $audit.artifacts | Add-Member -NotePropertyName approvedReport -NotePropertyValue ([pscustomobject]@{ file = $approvedName; sha256 = (Get-Sha256 $approved) }) -Force
     if ($exception) {
@@ -945,7 +1327,7 @@ function Approve-DossierRun {
         $audit.events += [pscustomobject]@{ atUtc = $approvedAt; event = 'approved'; detail = "by $Reviewer" }
     }
     Save-AuditLog $audit $auditPath
-    [pscustomobject]@{ RunId = $audit.runId; Report = $approved; Sha256 = $audit.artifacts.approvedReport.sha256; ApprovedAt = $approvedAt; Exception = $exception }
+    [pscustomobject]@{ RunId = $audit.runId; CaseId = $audit.caseId; Report = $approved; Sha256 = $audit.artifacts.approvedReport.sha256; ApprovedAt = $approvedAt; Exception = $exception }
 }
 
 Export-ModuleMember -Function *-*

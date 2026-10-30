@@ -1,0 +1,50 @@
+SHORT COMPLAINT REPORT - automatic draft
+
+Write the complete short report for case {{CASE_ID}} straight away. Use only the case data below, the classification of similar complaints calculated by the tool, and the content of the case documents. The original case files are also attached to this chat; treat them together with the document content below as the binding case documentation. There are no follow-up questions, additions or approval steps. Output only the finished report.
+
+DATA CHECK
+Compare the structured case data, the complaint description and the case documents with each other. Do not invent any information and no causes. Name relevant contradictions neutrally. For medical devices, give an IMDRF code if one is provided; if none is provided, write nothing about it. Never write "further closed complaints".
+
+Binding additional information for every short report:
+{{PROCESS_FACTS}}
+Take this information into account in the assessment of the batch record and never present it as missing or not checked.
+
+STATISTICS
+The tool calculates the statistics. Use the frequency level given below unchanged. Do not recalculate it and do not state internal numbers or calculation methods.
+
+BINDING TECHNICAL OUTPUT RULES
+Plain report text in English, no Markdown code block. Do not copy direct contact data such as names, e-mail addresses, phone numbers or postal addresses into the report. Refer to the source of the complaint as "consumer". Cite case IDs in square brackets, for example [{{CASE_ID}}].
+
+Sentences that must appear word for word:
+{{REQUIRED_STATEMENTS}}
+
+REPORT STRUCTURE
+Basic complaint data
+As a list: case ID; external reference or N/A; product group; batch; defect / complaint category; complaint description in two to three sentences; severity; source; transport, storage and use.
+
+1. Technical description and categorisation of the defect
+Describe the defect, the affected component and the defect category factually. Do not anticipate a cause.
+
+2. Statistical and historical classification
+Start exactly with: "The reported defect is classified as [frequency level given below]." Then place only the similar complaints, batches and investigation results given below in context. Several reports alone do not prove a trend or a manufacturing defect.
+
+3. Assessment of the available information
+Assess in this order: complaint sample and other documents, batch record, possible manufacturing defect. A product that was only shown or photographed, but not returned, is not a complaint sample. For the batch record, state as binding that it was reviewed and showed no findings.
+
+4. Conclusion
+At most three sentences. If the data is incomplete, it ends with: "The complaint is classified as not justified." A complete reference report may only be used for an identical defect and a unique reference number. Its final assessment is to be taken over unchanged.
+
+OUTPUT FORMAT
+Output only the complete report. Use exactly the headings given above, each on its own line. Each line of the basic data starts with "• ". The numbered sections contain running text only. No tables, follow-up questions, notes, requests for approval or text outside the report.
+
+### Complaint record (from the complaint list)
+{{CASE}}
+
+### Similar complaints (calculated by the tool)
+{{SIMILAR}}
+
+### Case documents
+{{DOCUMENTS}}
+
+### Attached files
+{{ATTACHMENTS}}

@@ -339,16 +339,20 @@ function Find-NewChatButton {
 }
 
 function Get-CopyButtons {
+    # Copy buttons in the chat, in document order. Offscreen buttons count too:
+    # a long answer pushes its own copy button below the visible area, while the
+    # copy button of the prompt above it is still on screen. Invoke works on
+    # offscreen buttons, and an offscreen element may report an empty rectangle,
+    # so the order of the UI Automation tree decides, not the screen position.
     param([IntPtr]$Handle)
     @(foreach ($button in @(Find-UiElements $Handle ([System.Windows.Automation.ControlType]::Button))) {
             try {
-                if ($button.Current.IsOffscreen -or -not $button.Current.IsEnabled) { continue }
+                if (-not $button.Current.IsEnabled) { continue }
                 if (([string]$button.Current.Name).Trim() -notmatch '(?i)^(copy|copy response|kopieren|antwort kopieren)$') { continue }
-                [pscustomobject]@{ Element = $button; Bottom = [double]$button.Current.BoundingRectangle.Bottom }
+                [pscustomobject]@{ Element = $button; Bottom = [double]$button.Current.BoundingRectangle.Bottom; Offscreen = [bool]$button.Current.IsOffscreen }
             } catch {}
         })
 }
-
 function Get-TextHash([string]$Text) {
     $normalized = ''
     if ($Text) { $normalized = $Text.Replace("`r`n", "`n").Trim() }
@@ -396,6 +400,8 @@ function Send-CopilotPrompt {
 
 function Wait-CopilotResponse {
     # Done when a new copy button exists and the input is ready for several polls.
+    # The last copy button in document order belongs to the newest answer; the
+    # prompt's own copy button comes before it.
     param([System.Diagnostics.Process]$Process, [int]$BaselineCopyButtons, [int]$TimeoutSeconds, [int]$StableChecks, [int]$PollMilliseconds)
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $stable = 0
@@ -405,7 +411,7 @@ function Wait-CopilotResponse {
         $state = Get-CopilotUiState $Process.MainWindowHandle
         $buttons = @(Get-CopyButtons $Process.MainWindowHandle)
         $newCopy = $null
-        if ($buttons.Count -gt $BaselineCopyButtons) { $newCopy = $buttons | Sort-Object Bottom -Descending | Select-Object -First 1 }
+        if ($buttons.Count -gt $BaselineCopyButtons) { $newCopy = $buttons[-1] }
         if ($state.Ready -and $null -ne $newCopy) {
             $stable++
             if ($stable -ge $StableChecks) { return $newCopy }
@@ -431,7 +437,7 @@ function Copy-CopilotResponse {
         $text = $null
         try { $text = [string](Get-Clipboard -Raw) } catch {}
         if (-not [string]::IsNullOrWhiteSpace($text) -and $text -ne $sentinel) {
-            if ((Get-TextHash $text) -eq (Get-TextHash $Prompt) -or $text.Contains('### Statistics (calculated by the tool)')) {
+            if ((Get-TextHash $text) -eq (Get-TextHash $Prompt) -or $text.Contains('### Complaint record (from the complaint list)')) {
                 throw 'The copied text is the prompt, not the answer.'
             }
             return $text

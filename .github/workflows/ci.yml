@@ -31,26 +31,36 @@ jobs:
           $config.TestResult.OutputPath = 'testResults.xml'
           Invoke-Pester -Configuration $config
 
-      - name: Demo run (PowerShell 7)
+      - name: Demo run, one report per open case (PowerShell 7)
+        # Runs after failed tests too, so the demo reports are available for debugging.
+        if: success() || failure()
         shell: pwsh
-        run: ./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo
+        run: |
+          ./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo
+          $reports = @(Get-ChildItem out/demo -Recurse -Filter *-DRAFT.docx)
+          if ($reports.Count -ne 6) { throw "Expected 6 DRAFT reports, found $($reports.Count)." }
+          $reports | ForEach-Object { $_.FullName }
 
-      - name: Demo run and approval (Windows PowerShell 5.1)
+      - name: Demo run and approval of one report (Windows PowerShell 5.1)
+        if: success() || failure()
         shell: powershell
         run: |
           ./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo-ps51
-          ./Approve-ComplaintDossier.ps1 -RunPath out/demo-ps51 -Reviewer 'CI check' -Comment 'Automated approval test on synthetic data.'
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./Approve-ComplaintDossier.ps1 -Path out/demo-ps51/SYN-2026-007 -Reviewer 'CI check' -Comment 'Automated approval test on synthetic data.'
 
-      - name: Upload demo report
+      - name: Upload demo reports
+        if: success() || failure()
         uses: actions/upload-artifact@v7
         with:
           name: complaint-dossier-demo
           path: |
-            out/demo/*.docx
-            out/demo/audit.json
-            out/demo/prompt.txt
-            out/demo/response.md
-            out/demo/statistics.json
+            out/demo/run.json
+            out/demo/*/*.docx
+            out/demo/*/audit.json
+            out/demo/*/case-data.json
+            out/demo/*/prompt.txt
+            out/demo/*/response.md
           retention-days: 7
           if-no-files-found: error
 

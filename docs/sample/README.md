@@ -1,25 +1,33 @@
-# Sample report
+# Sample reports
 
-The output of one demo run on the synthetic sample data, so you can read a report without running anything. The report is a DRAFT: nobody has approved it. Section 3 holds the prewritten sample answer from `samples/demo-response.md`, not output from Copilot.
+Two of the six reports from one demo run on the synthetic sample data, so you can read them without running anything. Both are DRAFTs: nobody has approved them. The report text in section 4 is the prewritten sample answer for that case from `samples/demo-responses/`, not output from Copilot.
+
+| Folder | Complaint | Report |
+| --- | --- | --- |
+| [SYN-2026-007/](SYN-2026-007/) | Foreign fibre in a cream, rated critical, no returned sample | Long report, [PDF](SYN-2026-007/SYN-2026-007-long-report-DRAFT.pdf), 3 pages |
+| [SYN-2026-006/](SYN-2026-006/) | Carton crushed in transport, with a CSV file in the case folder | Short report, [PDF](SYN-2026-006/SYN-2026-006-short-report-DRAFT.pdf), 2 pages |
+
+[complaint-dossier-sample-DRAFT.pdf](complaint-dossier-sample-DRAFT.pdf) is a copy of the SYN-2026-007 PDF under a stable name for links from elsewhere.
+
+Each folder holds the files of one report as the tool wrote them:
 
 | File | Content |
 | --- | --- |
-| [complaint-dossier-sample-DRAFT.pdf](complaint-dossier-sample-DRAFT.pdf) | The report as PDF, 3 pages |
-| [complaint-dossier-20261030T043840Z-2a9740-DRAFT.docx](complaint-dossier-20261030T043840Z-2a9740-DRAFT.docx) | The report as the tool wrote it |
-| [audit.json](audit.json) | SHA-256 of every input and output, checks, events, empty review field |
-| [prompt.txt](prompt.txt), [response.md](response.md), [statistics.json](statistics.json) | The files whose hashes audit.json records |
+| `<case id>-<type>-report-DRAFT.docx` | The report |
+| `audit.json` | SHA-256 of every input and output of this report, checks, events, empty review field |
+| `prompt.txt`, `response.md`, `case-data.json` | The files whose hashes audit.json records |
 
 ## How it was made
 
-- The run: `./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo`, step "Demo run (PowerShell 7)" of CI run [41003968651](https://github.com/vassiljevnikita-sudo/complaint-dossier/actions/runs/41003968651) for pull request [#5](https://github.com/vassiljevnikita-sudo/complaint-dossier/pull/5), `windows-latest`, PowerShell 7.6.7. That run used the code that pull request #5 merged into `main`; the later commit in that pull request only changed this folder, the README screenshot `docs/images/report-page1.png` and the demo GIF `docs/images/demo.gif`. The .docx, audit.json, prompt, response and statistics are the build artifact of that run, unchanged.
-- The PDF: rendered from the .docx with LibreOffice 24.2, `soffice --headless --convert-to pdf <report>.docx`, then renamed. It is not listed in audit.json.
+- The run: `./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo`, step "Demo run, one report per open case (PowerShell 7)" of CI run [41036469722](https://github.com/vassiljevnikita-sudo/complaint-dossier/actions/runs/41036469722) for pull request [#6](https://github.com/vassiljevnikita-sudo/complaint-dossier/pull/6), `windows-latest`, PowerShell 7.6.7, run ID `20261030T095212Z-0d886d`. The two folders are copied unchanged from the build artifact of that run. Its Pester step failed only because this folder did not exist yet.
+- The PDFs: rendered from the .docx files with LibreOffice 24.2, `soffice --headless --convert-to pdf <report>.docx`. They are not listed in audit.json.
 
 ## How it stays current
 
-The test "Committed sample in docs/sample" runs on every push. It checks the files in this folder against the hashes in audit.json. Then it runs the demo again and compares the input hashes, the prompt, statistics and response hashes, and the report text apart from run ID and timestamps. If a code change alters the report, CI fails until this folder is regenerated:
+The test "Committed sample in docs/sample" runs on every push. It checks the files in both folders against the hashes in their audit.json. Then it runs the demo again for SYN-2026-007 and SYN-2026-006 and compares the input hashes, the case data, prompt and response hashes, and the report text apart from run ID and timestamps. If a code change alters a report, CI fails until this folder is regenerated:
 
 ```powershell
 ./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/sample
 ```
 
-Copy the run files into this folder and render the PDF again as above. Then update the run ID, commit and run links in this file.
+Copy the two case folders into this folder, render the PDFs again as above and copy the SYN-2026-007 PDF to `complaint-dossier-sample-DRAFT.pdf`. Then update the run ID and links in this file.
