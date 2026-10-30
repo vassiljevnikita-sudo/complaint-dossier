@@ -13,7 +13,7 @@ jobs:
   test-and-demo:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Pester 5
         shell: pwsh
@@ -42,7 +42,7 @@ jobs:
           ./Approve-ComplaintDossier.ps1 -RunPath out/demo-ps51 -Reviewer 'CI check' -Comment 'Automated approval test on synthetic data.'
 
       - name: Upload demo report
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: complaint-dossier-demo
           path: |
@@ -56,7 +56,7 @@ jobs:
   scans:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 

@@ -35,6 +35,7 @@
     "WindowTitle": "Microsoft 365 Copilot",
     "PreferredModel": "",
     "PreferredModelGroup": "",
+    "TemporaryChat": true,
     "Upload": {
       "Path": "samples/attachments",
       "Extensions": [".pdf", ".docx", ".xlsx", ".txt", ".csv", ".png", ".jpg"],

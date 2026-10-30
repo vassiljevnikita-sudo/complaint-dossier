@@ -749,6 +749,7 @@ function Invoke-CopilotHandoff {
         '-AttachmentListFile', $listFile, '-WindowTitle', [string]$cp.WindowTitle, '-PreferredModel', [string]$cp.PreferredModel)
     # Windows PowerShell drops empty arguments, so optional values are only passed when set.
     if ([string](Get-ConfigValue $cp 'PreferredModelGroup')) { $arguments += @('-PreferredModelGroup', [string]$cp.PreferredModelGroup) }
+    if ([bool](Get-ConfigValue $cp 'TemporaryChat')) { $arguments += '-TemporaryChat' }
     foreach ($key in 'StartDelaySeconds', 'NewChatTimeoutSeconds', 'UploadTimeoutSeconds', 'ResponseTimeoutSeconds',
         'StableReadyChecks', 'PollMilliseconds', 'ModelMenuTimeoutMilliseconds') {
         $value = Get-ConfigValue $cp $key

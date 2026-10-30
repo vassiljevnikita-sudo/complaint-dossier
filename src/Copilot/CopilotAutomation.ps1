@@ -84,17 +84,11 @@ function Activate-CopilotWindow {
     throw 'Could not bring the Copilot window to the foreground.'
 }
 
-function Normalize-UiName([string]$Text) {
-    if ([string]::IsNullOrWhiteSpace($Text)) { return '' }
-    ($Text.ToLowerInvariant()) -replace '[^a-z0-9.]', ''
-}
-
-function Test-UiNameExact([string]$Name, [string]$Target) { (Normalize-UiName $Name) -eq (Normalize-UiName $Target) }
-
 function Get-WindowRoot {
     param([System.Diagnostics.Process]$Process)
     try { [System.Windows.Automation.AutomationElement]::FromHandle($Process.MainWindowHandle) } catch { $null }
 }
+
 
 function Find-UiElements {
     # All visible, enabled descendants of the Copilot window, optionally of one control type.
@@ -110,6 +104,7 @@ function Find-UiElements {
     } catch { @() }
 }
 
+
 function Find-ModelSwitcher {
     param([System.Diagnostics.Process]$Process)
     $root = Get-WindowRoot $Process
@@ -121,43 +116,6 @@ function Find-ModelSwitcher {
     $null
 }
 
-function Find-NamedUiElement {
-    # Exact name match inside the Copilot process tree. Buttons and menu items
-    # win over plain text labels with the same name.
-    param([System.Diagnostics.Process]$Process, [string]$Target)
-    $root = Get-WindowRoot $Process
-    if ($null -eq $root) { return $null }
-    $process = @($script:CopilotProcessIds | ForEach-Object {
-            New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, [int]$_)
-        })
-    $processCondition = $process[0]
-    if ($process.Count -gt 1) { $processCondition = [System.Windows.Automation.OrCondition]::new([System.Windows.Automation.Condition[]]$process) }
-    $nameCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $Target)
-    $condition = New-Object System.Windows.Automation.AndCondition($nameCondition, $processCondition)
-    $best = $null
-    foreach ($el in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)) {
-        try {
-            if ($el.Current.IsOffscreen -or -not $el.Current.IsEnabled) { continue }
-            $rect = $el.Current.BoundingRectangle
-            if ($rect.Width -le 0 -or $rect.Height -le 0) { continue }
-            $score = [int]$rect.Bottom
-            if ($el.Current.ControlType -ne [System.Windows.Automation.ControlType]::Text) { $score += 100000 }
-            if ($null -eq $best -or $score -gt $best.Score) { $best = [pscustomobject]@{ Element = $el; Name = ([string]$el.Current.Name).Trim(); Score = $score } }
-        } catch {}
-    }
-    $best
-}
-
-function Wait-ForNamedUiElement {
-    param([System.Diagnostics.Process]$Process, [string]$Target, [int]$TimeoutMilliseconds)
-    $watch = [Diagnostics.Stopwatch]::StartNew()
-    while ($watch.ElapsedMilliseconds -lt $TimeoutMilliseconds) {
-        $hit = Find-NamedUiElement $Process $Target
-        if ($null -ne $hit) { return $hit }
-        Start-Sleep -Milliseconds 100
-    }
-    $null
-}
 
 function Move-MouseToUiElement {
     param($Element)
@@ -165,6 +123,7 @@ function Move-MouseToUiElement {
     if ($Element.Current.IsOffscreen -or $rect.Width -le 0 -or $rect.Height -le 0) { throw 'UI element is not visible.' }
     [void][ComplaintDossierWin32]::SetCursorPos([int]($rect.Left + $rect.Width / 2), [int]($rect.Top + $rect.Height / 2))
 }
+
 
 function Click-UiElement {
     # Prefer UI Automation patterns; fall back to a mouse click on the element centre.
@@ -182,10 +141,67 @@ function Click-UiElement {
     [ComplaintDossierWin32]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
 }
 
+function Test-ModelLabel {
+    # Model menu items read "<model> <description>" ("Think Deeper Think longer
+    # for better answers"), the switcher reads "<model>, <hint>". A label
+    # matches when it is the model name or starts with it plus a space or comma.
+    param([string]$Name, [string]$Target)
+    $n = ([string]$Name).Trim()
+    $t = ([string]$Target).Trim()
+    if (-not $t) { return $false }
+    $c = [StringComparison]::OrdinalIgnoreCase
+    $n.Equals($t, $c) -or $n.StartsWith("$t ", $c) -or $n.StartsWith("$t,", $c)
+}
+
+function Select-ModelChoice {
+    # Picks one menu entry for $Target from candidates with a Name property.
+    # Exact names win over prefix matches; two equal matches are an error.
+    param([object[]]$Candidates, [string]$Target)
+    $exact = @($Candidates | Where-Object { ([string]$_.Name).Trim() -ieq $Target.Trim() })
+    if ($exact.Count -eq 1) { return $exact[0] }
+    $matching = @($Candidates | Where-Object { Test-ModelLabel $_.Name $Target })
+    if ($exact.Count -gt 1 -or $matching.Count -gt 1) {
+        throw "More than one Copilot menu entry matches '$Target': $(($matching | ForEach-Object { $_.Name }) -join ' | ')"
+    }
+    if ($matching.Count -eq 1) { return $matching[0] }
+    $null
+}
+
+function Find-ModelChoice {
+    # Visible menu entries (radio buttons, menu items) of the Copilot process tree.
+    param([System.Diagnostics.Process]$Process, [string]$Target)
+    $root = Get-WindowRoot $Process
+    if ($null -eq $root) { return $null }
+    $types = @([System.Windows.Automation.ControlType]::RadioButton, [System.Windows.Automation.ControlType]::MenuItem, [System.Windows.Automation.ControlType]::ListItem)
+    $candidates = @(foreach ($el in $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)) {
+            try {
+                $c = $el.Current
+                if ($c.IsOffscreen -or -not $c.IsEnabled -or $types -notcontains $c.ControlType) { continue }
+                if ($script:CopilotProcessIds -notcontains $c.ProcessId) { continue }
+                [pscustomobject]@{ Element = $el; Name = ([string]$c.Name).Trim() }
+            } catch {}
+        })
+    Select-ModelChoice $candidates $Target
+}
+
+function Wait-ForModelChoice {
+    param([System.Diagnostics.Process]$Process, [string]$Target, [int]$TimeoutMilliseconds)
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    while ($watch.ElapsedMilliseconds -lt $TimeoutMilliseconds) {
+        $hit = Find-ModelChoice $Process $Target
+        if ($null -ne $hit) { return $hit }
+        Start-Sleep -Milliseconds 100
+    }
+    $null
+}
+
+function Close-CopilotMenu { [System.Windows.Forms.SendKeys]::SendWait('{ESC}') }
+
 function Select-PreferredModel {
     <#
-      Selects the configured model in the Copilot model menu. If the model (or
-      its group submenu) is not offered, it throws. It never falls back to
+      Selects the configured model in the Copilot model menu and checks that
+      the switcher shows it afterwards. If the model (or its group submenu) is
+      not offered, it closes the menu and throws. It never falls back to
       another model.
     #>
     param([System.Diagnostics.Process]$Process, [string]$Target, [string]$Group, [int]$TimeoutMilliseconds = 3000)
@@ -193,26 +209,60 @@ function Select-PreferredModel {
     Activate-CopilotWindow $Process
     $switcher = Find-ModelSwitcher $Process
     if ($null -eq $switcher) { throw 'Copilot model switcher not found.' }
-    if (Test-UiNameExact $switcher.Name $Target) { return $switcher.Name }
+    if (Test-ModelLabel $switcher.Name $Target) { return $switcher.Name }
     Click-UiElement $switcher.Element
 
-    $selected = Wait-ForNamedUiElement $Process $Target $TimeoutMilliseconds
+    $selected = Wait-ForModelChoice $Process $Target $TimeoutMilliseconds
     if ($null -eq $selected -and -not [string]::IsNullOrWhiteSpace($Group)) {
-        $parent = Wait-ForNamedUiElement $Process $Group $TimeoutMilliseconds
-        if ($null -eq $parent) { throw "Configured model group not found in the Copilot menu: $Group" }
-        # The group opens its submenu on hover, as in the Copilot app.
+        $parent = Wait-ForModelChoice $Process $Group $TimeoutMilliseconds
+        if ($null -eq $parent) { Close-CopilotMenu; throw "Configured model group not found in the Copilot menu: $Group" }
+        # The group opens its submenu on hover.
         Move-MouseToUiElement $parent.Element
-        $selected = Wait-ForNamedUiElement $Process $Target $TimeoutMilliseconds
+        $selected = Wait-ForModelChoice $Process $Target $TimeoutMilliseconds
     }
-    if ($null -eq $selected) { throw "Configured model not found in the Copilot menu: $Target" }
+    if ($null -eq $selected) { Close-CopilotMenu; throw "Configured model not found in the Copilot menu: $Target" }
     Click-UiElement $selected.Element
     Start-Sleep -Milliseconds 700
     Activate-CopilotWindow $Process
     $after = Find-ModelSwitcher $Process
     $shown = ''
     if ($null -ne $after) { $shown = $after.Name }
-    Write-Host ("[model] selected '{0}' (switcher now shows '{1}')" -f $Target, $shown)
+    if (-not (Test-ModelLabel $shown $Target)) { throw "Copilot did not confirm the model '$Target'; the switcher shows '$shown'." }
+    Write-Host ("[model] selected '{0}' (switcher shows '{1}')" -f $Target, $shown)
     $shown
+}
+
+function Get-TemporaryChatToggle {
+    # Returns the toggle and its state, or $null. The app re-renders the button
+    # after a click, so callers look it up again instead of keeping the element.
+    param([System.Diagnostics.Process]$Process)
+    $buttons = @(Find-UiElements $Process.MainWindowHandle ([System.Windows.Automation.ControlType]::Button) | Where-Object {
+            -not $_.Current.IsOffscreen -and ([string]$_.Current.Name).Trim() -match '(?i)^(temporary chat|tempor.rer chat)$'
+        })
+    if ($buttons.Count -ne 1) { return $null }
+    $pattern = $null
+    $state = 'unknown'
+    if ($buttons[0].TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) { $state = [string]$pattern.Current.ToggleState }
+    [pscustomobject]@{ Element = $buttons[0]; State = $state }
+}
+
+function Enable-TemporaryChat {
+    # Switches the new chat to a temporary chat, which Copilot does not keep in
+    # the chat history. Fails if the toggle is missing or does not switch on.
+    param([System.Diagnostics.Process]$Process, [int]$TimeoutMilliseconds = 5000)
+    $toggle = Get-TemporaryChatToggle $Process
+    if ($null -eq $toggle) { throw 'Temporary chat toggle not found. Set Copilot.TemporaryChat to false if your Copilot has none.' }
+    if ($toggle.State -eq 'On') { return }
+    Click-UiElement $toggle.Element
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    while ($watch.ElapsedMilliseconds -lt $TimeoutMilliseconds) {
+        Start-Sleep -Milliseconds 250
+        $toggle = Get-TemporaryChatToggle $Process
+        if ($null -ne $toggle -and $toggle.State -eq 'On') { return }
+    }
+    $state = 'toggle not found'
+    if ($null -ne $toggle) { $state = $toggle.State }
+    throw "Temporary chat did not switch on (state: $state)."
 }
 
 function Find-CopilotInput {

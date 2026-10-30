@@ -6,7 +6,9 @@
   Started by Invoke-CopilotHandoff (src/ComplaintDossier.psm1) in Windows
   PowerShell 5.1 with -STA. Steps:
     1. check that the desktop is unlocked and find the Copilot window
-    2. open a new chat, so no earlier conversation leaks into the answer
+    2. open a new chat, so no earlier conversation leaks into the answer;
+       with -TemporaryChat switch it to a temporary chat that Copilot does
+       not keep in the chat history
     3. select the configured model; abort if the menu does not offer it
     4. attach the files listed in -AttachmentListFile (Add-CopilotAttachment.ps1)
     5. paste the prompt, press Enter, wait until the answer is complete
@@ -23,6 +25,7 @@ param(
     [string]$WindowTitle = 'Microsoft 365 Copilot',
     [string]$PreferredModel = '',
     [string]$PreferredModelGroup = '',
+    [switch]$TemporaryChat,
     [int]$StartDelaySeconds = 3,
     [int]$NewChatTimeoutSeconds = 30,
     [int]$UploadTimeoutSeconds = 60,
@@ -43,6 +46,7 @@ $status = [ordered]@{
     preferredModel  = $PreferredModel
     modelGroup      = $PreferredModelGroup
     modelShown      = $null
+    temporaryChat   = [bool]$TemporaryChat
     uploads         = @()
     inputMethod     = $null
     responseChars   = 0
@@ -78,6 +82,11 @@ try {
     Start-Sleep -Milliseconds 800
     Wait-CopilotReady $copilot $NewChatTimeoutSeconds $StableReadyChecks $PollMilliseconds
     Add-Step 'new chat opened'
+    if ($TemporaryChat) {
+        Enable-TemporaryChat $copilot
+        Wait-CopilotReady $copilot $NewChatTimeoutSeconds $StableReadyChecks $PollMilliseconds
+        Add-Step 'temporary chat switched on'
+    }
 
     $status.modelShown = Select-PreferredModel -Process $copilot -Target $PreferredModel -Group $PreferredModelGroup -TimeoutMilliseconds $ModelMenuTimeoutMilliseconds
     Wait-CopilotReady $copilot $NewChatTimeoutSeconds $StableReadyChecks $PollMilliseconds

@@ -8,11 +8,22 @@ BeforeAll {
     . (Join-Path $script:Root 'src/Copilot/CopilotAutomation.ps1')
 }
 
-Describe 'UI name matching' {
-    It 'ignores case, spaces and punctuation except dots' {
-        Test-UiNameExact 'GPT-5 Think Deeper' 'gpt5 think deeper' | Should -BeTrue
-        Test-UiNameExact 'Model 4.1' 'Model 41' | Should -BeFalse
-        Normalize-UiName '' | Should -Be ''
+Describe 'Model label matching' {
+    It 'matches menu items with a description and the switcher with a hint' {
+        Test-ModelLabel 'Think Deeper Think longer for better answers' 'Think Deeper' | Should -BeTrue
+        Test-ModelLabel 'Quick Response, Modellauswahl' 'quick response' | Should -BeTrue
+        Test-ModelLabel 'Auto' 'Auto' | Should -BeTrue
+    }
+    It 'does not match a different model with the same beginning' {
+        Test-ModelLabel 'Think Deeper Think longer' 'Think Deep' | Should -BeFalse
+        Test-ModelLabel 'Auto, model picker' '' | Should -BeFalse
+    }
+    It 'prefers an exact name and rejects two prefix matches' {
+        $items = @([pscustomobject]@{ Name = 'Model A' }, [pscustomobject]@{ Name = 'Model A mini' })
+        (Select-ModelChoice $items 'Model A').Name | Should -Be 'Model A'
+        $items = @([pscustomobject]@{ Name = 'Model A fast' }, [pscustomobject]@{ Name = 'Model A slow' })
+        { Select-ModelChoice $items 'Model A' } | Should -Throw '*More than one*'
+        Select-ModelChoice $items 'Model B' | Should -BeNullOrEmpty
     }
 }
 
@@ -22,37 +33,54 @@ Describe 'Select-PreferredModel' {
         Mock Start-Sleep {}
         Mock Write-Host {}
         Mock Move-MouseToUiElement {}
-        Mock Click-UiElement {}
-        Mock Find-ModelSwitcher { [pscustomobject]@{ Element = 'switcher'; Name = 'Auto' } }
+        Mock Close-CopilotMenu {}
+        $script:clicked = @()
+        Mock Click-UiElement { $script:clicked += $Element }
+        # The switcher shows the last clicked model, like the real app.
+        Mock Find-ModelSwitcher {
+            $name = 'Auto, model picker'
+            if ($script:clicked -contains 'model-x') { $name = 'Model X, model picker' }
+            [pscustomobject]@{ Element = 'switcher'; Name = $name }
+        }
     }
 
     It 'refuses to run without a configured model' {
         { Select-PreferredModel -Process $null -Target '' } | Should -Throw '*No model configured*'
         Should -Invoke Click-UiElement -Times 0
     }
-    It 'aborts when the menu does not offer the model and clicks nothing else' {
-        Mock Wait-ForNamedUiElement { $null }
+    It 'aborts when the menu does not offer the model, closes the menu and clicks nothing else' {
+        Mock Wait-ForModelChoice { $null }
         { Select-PreferredModel -Process $null -Target 'Model X' } | Should -Throw '*Configured model not found in the Copilot menu: Model X*'
-        Should -Invoke Click-UiElement -Times 1 -Exactly -ParameterFilter { $Element -eq 'switcher' }
+        $script:clicked | Should -Be @('switcher')
+        Should -Invoke Close-CopilotMenu -Times 1 -Exactly
     }
     It 'aborts when the configured model group is missing' {
-        Mock Wait-ForNamedUiElement { $null }
+        Mock Wait-ForModelChoice { $null }
         { Select-PreferredModel -Process $null -Target 'Model X' -Group 'More models' } | Should -Throw '*model group not found*More models*'
     }
-    It 'opens the group submenu and clicks the configured model' {
+    It 'selects the model and returns what the switcher shows' {
+        Mock Wait-ForModelChoice { if ($Target -eq 'Model X') { [pscustomobject]@{ Element = 'model-x'; Name = 'Model X Fast answers' } } }
+        Select-PreferredModel -Process $null -Target 'Model X' | Should -Be 'Model X, model picker'
+        $script:clicked | Should -Be @('switcher', 'model-x')
+    }
+    It 'opens the group submenu before looking for the model' {
         $script:hovered = $false
         Mock Move-MouseToUiElement { $script:hovered = $true }
-        Mock Wait-ForNamedUiElement {
+        Mock Wait-ForModelChoice {
             if ($Target -eq 'More models') { return [pscustomobject]@{ Element = 'group'; Name = 'More models' } }
             if ($Target -eq 'Model X' -and $script:hovered) { return [pscustomobject]@{ Element = 'model-x'; Name = 'Model X' } }
             $null
         }
-        Select-PreferredModel -Process $null -Target 'Model X' -Group 'More models' | Should -Be 'Auto'
-        Should -Invoke Click-UiElement -Times 1 -Exactly -ParameterFilter { $Element -eq 'model-x' }
+        Select-PreferredModel -Process $null -Target 'Model X' -Group 'More models' | Should -Be 'Model X, model picker'
+        $script:hovered | Should -BeTrue
+    }
+    It 'fails when the switcher does not show the model after the click' {
+        Mock Wait-ForModelChoice { [pscustomobject]@{ Element = 'other'; Name = 'Model X' } }
+        { Select-PreferredModel -Process $null -Target 'Model X' } | Should -Throw "*did not confirm the model 'Model X'*Auto, model picker*"
     }
     It 'does not touch the menu when the model is already selected' {
-        Mock Find-ModelSwitcher { [pscustomobject]@{ Element = 'switcher'; Name = 'Model X' } }
-        Select-PreferredModel -Process $null -Target 'model x' | Should -Be 'Model X'
+        Mock Find-ModelSwitcher { [pscustomobject]@{ Element = 'switcher'; Name = 'Model X, model picker' } }
+        Select-PreferredModel -Process $null -Target 'model x' | Should -Be 'Model X, model picker'
         Should -Invoke Click-UiElement -Times 0
     }
 }
