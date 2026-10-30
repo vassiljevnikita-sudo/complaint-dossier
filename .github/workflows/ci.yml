@@ -32,6 +32,8 @@ jobs:
           Invoke-Pester -Configuration $config
 
       - name: Demo run, one report per open case (PowerShell 7)
+        # Runs after failed tests too, so the demo reports are available for debugging.
+        if: success() || failure()
         shell: pwsh
         run: |
           ./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo
@@ -40,6 +42,7 @@ jobs:
           $reports | ForEach-Object { $_.FullName }
 
       - name: Demo run and approval of one report (Windows PowerShell 5.1)
+        if: success() || failure()
         shell: powershell
         run: |
           ./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo-ps51
@@ -47,6 +50,7 @@ jobs:
           ./Approve-ComplaintDossier.ps1 -Path out/demo-ps51/SYN-2026-007 -Reviewer 'CI check' -Comment 'Automated approval test on synthetic data.'
 
       - name: Upload demo reports
+        if: success() || failure()
         uses: actions/upload-artifact@v7
         with:
           name: complaint-dossier-demo
