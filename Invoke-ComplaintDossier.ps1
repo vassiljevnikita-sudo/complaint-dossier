@@ -133,7 +133,8 @@ if ($todo.Count) { Write-Host '' }
 foreach ($item in $todo) {
     $n++
     $id = $item.Case.CaseId
-    $typeText = Get-DossierText ('Type' + $item.Type)
+    $typeWidth = [math]::Max((Get-DossierText 'TypeShort').Length, (Get-DossierText 'TypeLong').Length)
+    $typeText = (Get-DossierText ('Type' + $item.Type)).PadRight($typeWidth)
     $format = '[{0,' + ([string]$todo.Count).Length + '}/{1}] {2}  {3}'
     $line = $format -f $n, $todo.Count, $id, $typeText
     Write-Host -NoNewline "$line ... "
