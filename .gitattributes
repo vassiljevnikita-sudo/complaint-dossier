@@ -1,0 +1,10 @@
+# Check out text files with LF on every platform. The demo run hashes its
+# inputs and outputs, so Windows, Linux and macOS then produce the same
+# prompt and response hashes, and the committed sample in docs/sample/
+# can be reproduced byte for byte.
+* text=auto eol=lf
+*.docx binary
+*.xlsx binary
+*.pdf binary
+*.png binary
+*.gif binary
