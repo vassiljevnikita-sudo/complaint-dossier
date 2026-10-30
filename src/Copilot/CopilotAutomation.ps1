@@ -21,16 +21,36 @@ public static class ComplaintDossierWin32 {
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
     [DllImport("user32.dll")] public static extern void keybd_event(byte vk, byte scan, uint flags, UIntPtr extra);
+    [DllImport("user32.dll", EntryPoint="SendMessageTimeoutW")] public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam, uint flags, uint timeout, out IntPtr result);
+    public static bool Send(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam) { IntPtr r; return SendMessageTimeout(hWnd, msg, wParam, lParam, 2, 5000, out r) != IntPtr.Zero; }
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+    [DllImport("user32.dll")] public static extern bool GetKeyboardState(byte[] state);
+    [DllImport("user32.dll")] public static extern bool SetKeyboardState(byte[] state);
+    public delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr parent, EnumProc callback, IntPtr lParam);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder name, int count);
+    public static System.Collections.Generic.List<IntPtr> FindChildren(IntPtr parent, string className) {
+        var found = new System.Collections.Generic.List<IntPtr>();
+        EnumChildWindows(parent, (h, l) => { var sb = new System.Text.StringBuilder(256); GetClassName(h, sb, 256); if (sb.ToString() == className) found.Add(h); return true; }, IntPtr.Zero);
+        return found;
+    }
 }
 "@
     }
 }
 
-function Assert-InputDesktop {
-    # UI Automation needs an unlocked, connected desktop session.
+function Test-InputDesktop {
+    # Reports whether the session has a reachable input desktop (connected and
+    # unlocked). Informational only: the round trip uses UI Automation and
+    # window messages addressed to the Copilot window, never input to whatever
+    # window is active, so it also runs in a disconnected or undrawn session.
     $desktop = [ComplaintDossierWin32]::OpenInputDesktop(0, $false, 1)
-    if ($desktop -eq [IntPtr]::Zero) { throw 'Windows input desktop not reachable. Unlock or reconnect the session; Copilot UI Automation needs an active desktop.' }
+    if ($desktop -eq [IntPtr]::Zero) { return $false }
     [void][ComplaintDossierWin32]::CloseDesktop($desktop)
+    $true
 }
 
 function Get-CopilotWindow {
@@ -63,25 +83,18 @@ function Get-CopilotProcessIds {
 }
 
 function Activate-CopilotWindow {
+    # Opportunistic: tries to bring the window to the front and reports whether
+    # that worked. Nothing depends on it. Every later step uses UI Automation
+    # patterns or window messages, which also work when the window is not in the
+    # foreground or the remote desktop session is not drawn.
     param([System.Diagnostics.Process]$Process)
     if ($Process.MainWindowHandle -eq 0) { throw 'Copilot has no window handle.' }
-    [void][ComplaintDossierWin32]::ShowWindowAsync($Process.MainWindowHandle, 9)
-    Start-Sleep -Milliseconds 250
-    for ($attempt = 1; $attempt -le 4; $attempt++) {
+    try {
+        [void][ComplaintDossierWin32]::ShowWindowAsync($Process.MainWindowHandle, 9)
         [void][ComplaintDossierWin32]::SetForegroundWindow($Process.MainWindowHandle)
-        Start-Sleep -Milliseconds 250
-        if ([ComplaintDossierWin32]::GetForegroundWindow() -eq $Process.MainWindowHandle) { return }
-        # Windows only lets a background process take the foreground after a
-        # key event; a bare ALT press satisfies that rule without side effects.
-        [ComplaintDossierWin32]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
-        [ComplaintDossierWin32]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
-        [void][ComplaintDossierWin32]::SetForegroundWindow($Process.MainWindowHandle)
-        Start-Sleep -Milliseconds 250
-        if ([ComplaintDossierWin32]::GetForegroundWindow() -eq $Process.MainWindowHandle) { return }
-        try { [void](New-Object -ComObject WScript.Shell).AppActivate($Process.Id); Start-Sleep -Milliseconds 300 } catch {}
-        if ([ComplaintDossierWin32]::GetForegroundWindow() -eq $Process.MainWindowHandle) { return }
-    }
-    throw 'Could not bring the Copilot window to the foreground.'
+        Start-Sleep -Milliseconds 150
+        return ([ComplaintDossierWin32]::GetForegroundWindow() -eq $Process.MainWindowHandle)
+    } catch { return $false }
 }
 
 function Get-WindowRoot {
@@ -126,12 +139,14 @@ function Move-MouseToUiElement {
 
 
 function Click-UiElement {
-    # Prefer UI Automation patterns; fall back to a mouse click on the element centre.
+    # UI Automation patterns first (they need no foreground); a mouse click on the
+    # element centre is the last resort and only works on a drawn desktop.
     param($Element)
     if ($null -eq $Element) { throw 'UI element is null.' }
     $pattern = $null
     try {
         if ($Element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) { $pattern.Invoke(); return }
+        if ($Element.TryGetCurrentPattern([System.Windows.Automation.TogglePattern]::Pattern, [ref]$pattern)) { $pattern.Toggle(); return }
         if ($Element.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern, [ref]$pattern)) { $pattern.Select(); return }
         if ($Element.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$pattern)) { $pattern.Expand(); return }
     } catch {}
@@ -195,7 +210,28 @@ function Wait-ForModelChoice {
     $null
 }
 
-function Close-CopilotMenu { [System.Windows.Forms.SendKeys]::SendWait('{ESC}') }
+function Close-CopilotMenu {
+    # Collapses the model switcher; without the pattern, posts Escape to the web view.
+    param([System.Diagnostics.Process]$Process)
+    $pattern = $null
+    try {
+        $switcher = Find-ModelSwitcher $Process
+        if ($null -ne $switcher -and $switcher.Element.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$pattern)) { $pattern.Collapse(); return }
+    } catch {}
+    try { Send-KeyMessage -Handle (Get-RenderWidget $Process.MainWindowHandle) -VirtualKey 0x1B } catch {}
+}
+
+function Open-UiSubmenu {
+    # Opens a submenu entry through ExpandCollapse or Invoke; hovering with the
+    # mouse is the last resort.
+    param($Element)
+    $pattern = $null
+    try {
+        if ($Element.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern, [ref]$pattern)) { $pattern.Expand(); return }
+        if ($Element.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern, [ref]$pattern)) { $pattern.Invoke(); return }
+    } catch {}
+    Move-MouseToUiElement $Element
+}
 
 function Select-PreferredModel {
     <#
@@ -206,7 +242,7 @@ function Select-PreferredModel {
     #>
     param([System.Diagnostics.Process]$Process, [string]$Target, [string]$Group, [int]$TimeoutMilliseconds = 3000)
     if ([string]::IsNullOrWhiteSpace($Target)) { throw 'No model configured (Copilot.PreferredModel). Refusing to run with an unknown model.' }
-    Activate-CopilotWindow $Process
+    [void](Activate-CopilotWindow $Process)
     $switcher = Find-ModelSwitcher $Process
     if ($null -eq $switcher) { throw 'Copilot model switcher not found.' }
     if (Test-ModelLabel $switcher.Name $Target) { return $switcher.Name }
@@ -215,15 +251,13 @@ function Select-PreferredModel {
     $selected = Wait-ForModelChoice $Process $Target $TimeoutMilliseconds
     if ($null -eq $selected -and -not [string]::IsNullOrWhiteSpace($Group)) {
         $parent = Wait-ForModelChoice $Process $Group $TimeoutMilliseconds
-        if ($null -eq $parent) { Close-CopilotMenu; throw "Configured model group not found in the Copilot menu: $Group" }
-        # The group opens its submenu on hover.
-        Move-MouseToUiElement $parent.Element
+        if ($null -eq $parent) { Close-CopilotMenu $Process; throw "Configured model group not found in the Copilot menu: $Group" }
+        Open-UiSubmenu $parent.Element
         $selected = Wait-ForModelChoice $Process $Target $TimeoutMilliseconds
     }
-    if ($null -eq $selected) { Close-CopilotMenu; throw "Configured model not found in the Copilot menu: $Target" }
+    if ($null -eq $selected) { Close-CopilotMenu $Process; throw "Configured model not found in the Copilot menu: $Target" }
     Click-UiElement $selected.Element
     Start-Sleep -Milliseconds 700
-    Activate-CopilotWindow $Process
     $after = Find-ModelSwitcher $Process
     $shown = ''
     if ($null -ne $after) { $shown = $after.Name }
@@ -360,62 +394,259 @@ function Get-TextHash([string]$Text) {
     try { ([BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($normalized)))).Replace('-', '') } finally { $sha.Dispose() }
 }
 
+function Get-RenderWidget {
+    # The WebView2 child window that receives keyboard messages for the chat page.
+    param([IntPtr]$Handle)
+    $widgets = @([ComplaintDossierWin32]::FindChildren($Handle, 'Chrome_RenderWidgetHostHWND') | Where-Object { [ComplaintDossierWin32]::IsWindowVisible($_) })
+    if ($widgets.Count -eq 0) { throw 'Copilot web view window (Chrome_RenderWidgetHostHWND) not found.' }
+    $widgets[0]
+}
+
+function Send-KeyMessage {
+    <#
+      Sends one key press to the web view (synchronous window messages, so the
+      order with the typed characters is kept). Shift or Control are set in the
+      keyboard state of the web view's input thread while the key is handled, so
+      Shift+Enter makes a line break instead of sending. Needs no foreground
+      window and no drawn desktop.
+    #>
+    param([IntPtr]$Handle, [int]$VirtualKey, [switch]$Shift, [switch]$Control, [switch]$WithChar)
+    $processId = [uint32]0
+    $target = [ComplaintDossierWin32]::GetWindowThreadProcessId($Handle, [ref]$processId)
+    $me = [ComplaintDossierWin32]::GetCurrentThreadId()
+    $attached = $false
+    $original = $null
+    if ($Shift -or $Control) {
+        $attached = [ComplaintDossierWin32]::AttachThreadInput($me, $target, $true)
+        $state = New-Object byte[] 256
+        [void][ComplaintDossierWin32]::GetKeyboardState($state)
+        $original = [byte[]]$state.Clone()
+        if ($Shift) { $state[0x10] = 0x80; $state[0xA0] = 0x80 }
+        if ($Control) { $state[0x11] = 0x80; $state[0xA2] = 0x80 }
+        [void][ComplaintDossierWin32]::SetKeyboardState($state)
+    }
+    try {
+        if (-not [ComplaintDossierWin32]::Send($Handle, 0x0100, [IntPtr]$VirtualKey, [IntPtr]1)) { throw 'The Copilot web view did not take a key message.' }
+        if ($WithChar) { [void][ComplaintDossierWin32]::Send($Handle, 0x0102, [IntPtr]$VirtualKey, [IntPtr]1) }
+        [void][ComplaintDossierWin32]::Send($Handle, 0x0101, [IntPtr]$VirtualKey, [IntPtr]0xC0000001)
+        Start-Sleep -Milliseconds 30
+    } finally {
+        if ($null -ne $original) { [void][ComplaintDossierWin32]::SetKeyboardState($original) }
+        if ($attached) { [void][ComplaintDossierWin32]::AttachThreadInput($me, $target, $false) }
+    }
+}
+
+function Send-TextMessages {
+    # Types text into the focused web element with WM_CHAR messages (Unicode,
+    # synchronous); line breaks become Shift+Enter.
+    param([IntPtr]$Handle, [string]$Text)
+    $lines = $Text.Replace("`r`n", "`n").Replace("`t", '    ') -split "`n"
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($i -gt 0) { Send-KeyMessage -Handle $Handle -VirtualKey 0x0D -Shift -WithChar }
+        foreach ($ch in $lines[$i].ToCharArray()) {
+            if (-not [ComplaintDossierWin32]::Send($Handle, 0x0102, [IntPtr][int]$ch, [IntPtr]1)) { throw 'The Copilot web view did not take a typed character.' }
+        }
+    }
+}
+
+function Get-ComparableText {
+    <#
+      Text as the chat input holds it, for the read-back check. The editor turns
+      line breaks and Markdown marks typed at a line start (#, -, 1.) into its own
+      formatting, so -Strict ignores white space only, and the default also ignores
+      the Markdown mark characters. Letters, digits and punctuation must match.
+    #>
+    param([string]$Text, [switch]$Strict)
+    if (-not $Text) { return '' }
+    $flat = $Text -replace '\s+', ''
+    if ($Strict) { return $flat }
+    $marks = '[#*>\-' + [char]0x2022 + ']'
+    ($flat -replace '\d+[.)]', '') -replace $marks, ''
+}
+
+function Clear-CopilotInput {
+    # Select all and delete, repeated until the input reads empty.
+    param([IntPtr]$Widget, $InputElement, [int]$TimeoutSeconds = 30)
+    $watch = [Diagnostics.Stopwatch]::StartNew()
+    do {
+        Send-KeyMessage -Handle $Widget -VirtualKey 0x41 -Control
+        Send-KeyMessage -Handle $Widget -VirtualKey 0x08
+        Start-Sleep -Milliseconds 700
+        if ($null -eq $InputElement -or -not (Get-InputValue $InputElement)) { return }
+    } while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds)
+    throw 'Could not clear the Copilot chat input.'
+}
+
+function Find-SendButton {
+    param([IntPtr]$Handle)
+    @(Find-UiElements $Handle ([System.Windows.Automation.ControlType]::Button) | Where-Object {
+            try { $_.Current.IsEnabled -and ([string]$_.Current.Name).Trim() -match '(?i)^(senden|send|submit|absenden|nachricht senden|send message)$' } catch { $false }
+        }) | Select-Object -First 1
+}
+
 function Send-CopilotPrompt {
     <#
-      Puts the prompt into the chat input and presses Enter. Tries ValuePattern
-      first and checks the read-back; falls back to clipboard paste. The prompt
-      is never left in the clipboard.
+      Puts the prompt into the chat input and sends it, without foreground,
+      clipboard or SendKeys:
+        1. ValuePattern.SetValue, if the input takes it (checked by read-back)
+        2. otherwise WM_CHAR messages to the web view, line breaks as Shift+Enter,
+           checked by read-back of the input text
+      Then the send button is invoked through UI Automation (Enter as fallback).
+      Throws, without sending, when the input does not hold the prompt.
     #>
-    param([System.Diagnostics.Process]$Process, [string]$Text)
-    Activate-CopilotWindow $Process
+    param($Process, [string]$Text, [int]$TimeoutSeconds = 900, [int]$StallSeconds = 180)
     $box = Find-CopilotInput $Process.MainWindowHandle
     if ($null -eq $box) { throw 'Copilot chat input not found.' }
-    $box.SetFocus()
-    Start-Sleep -Milliseconds 120
-    $expected = Get-TextHash $Text
+    try { $box.SetFocus() } catch {}
+    Start-Sleep -Milliseconds 150
+    $expected = Get-ComparableText $Text
     $method = $null
     $pattern = $null
     try {
         if ($box.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$pattern)) {
             $pattern.SetValue($Text)
-            Start-Sleep -Milliseconds 300
-            if ((Get-TextHash (Get-InputValue $box)) -eq $expected) { $method = 'ValuePattern' }
+            Start-Sleep -Milliseconds 400
+            if ((Get-ComparableText (Get-InputValue $box)) -eq $expected) { $method = 'ValuePattern' }
         }
     } catch {}
+    $widget = Get-RenderWidget $Process.MainWindowHandle
     if ($null -eq $method) {
-        $box.SetFocus()
-        [System.Windows.Forms.SendKeys]::SendWait('^a')
-        Set-Clipboard -Value $Text
-        Start-Sleep -Milliseconds 80
-        [System.Windows.Forms.SendKeys]::SendWait('^v')
-        Start-Sleep -Milliseconds 300
-        Set-Clipboard -Value ' '
-        $method = 'ClipboardPaste'
+        if (Get-InputValue $box) { Clear-CopilotInput $widget $box }
+        try { $box.SetFocus() } catch {}
+        Send-TextMessages -Handle $widget -Text $Text
+        # The page may take a while to process the typed text, especially when
+        # Windows treats the window as hidden. Wait while the input keeps growing.
+        $watch = [Diagnostics.Stopwatch]::StartNew()
+        $actual = ''
+        $lastLength = -1
+        $lastChange = 0
+        do {
+            Start-Sleep -Milliseconds 1000
+            $actual = Get-ComparableText (Get-InputValue $box)
+            if ($actual -eq $expected) { break }
+            if ($actual.Length -ne $lastLength) { $lastLength = $actual.Length; $lastChange = $watch.Elapsed.TotalSeconds }
+        } while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds -and ($watch.Elapsed.TotalSeconds - $lastChange) -lt $StallSeconds)
+        if ($actual -ne $expected) {
+            $at = 0
+            while ($at -lt [Math]::Min($actual.Length, $expected.Length) -and $actual[$at] -eq $expected[$at]) { $at++ }
+            try { Clear-CopilotInput $widget $box } catch {}
+            throw ("The chat input does not hold the prompt (expected {0} characters without white space and Markdown marks, found {1}, first difference at {2}). Nothing was sent." -f $expected.Length, $actual.Length, $at)
+        }
+        $method = 'WindowMessages'
+        if ((Get-ComparableText (Get-InputValue $box) -Strict) -ne (Get-ComparableText $Text -Strict)) { $method = 'WindowMessages (editor formatted Markdown marks)' }
     }
-    Start-Sleep -Milliseconds 180
-    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
-    Start-Sleep -Milliseconds 200
+    $send = Find-SendButton $Process.MainWindowHandle
+    if ($null -ne $send) { Click-UiElement $send; $method += '+SendButton' }
+    else { Send-KeyMessage -Handle $widget -VirtualKey 0x0D -WithChar; $method += '+Enter' }
+    Start-Sleep -Milliseconds 500
     $method
 }
 
+function Get-AnswerTitles {
+    # "Copilot said:" labels, one per answer, in document order.
+    param([IntPtr]$Handle)
+    @(Find-UiElements $Handle ([System.Windows.Automation.ControlType]::Text) | Where-Object {
+            try { ([string]$_.Current.AutomationId) -like 'copilot-message-*-title' } catch { $false }
+        })
+}
+
+function Get-UiTextLines {
+    <#
+      Text of an answer, one line per paragraph or heading, from the UI
+      Automation tree. Buttons (citations, file cards) and images are skipped.
+      $Node is anything with Type, Name and Children; see ConvertTo-UiNode.
+    #>
+    param($Node, [int]$Depth = 0)
+    switch ($Node.Type) {
+        'Button' { return }
+        'Image' { return }
+        'Text' { if ([string]$Node.Name -and $Node.Name.Trim()) { return $Node.Name.Trim() }; return }
+        'ListItem' {
+            # List items may carry their text only as Name; an ordered list does not expose its numbers.
+            $inner = (@(foreach ($child in $Node.Children) { Get-UiTextLines $child ($Depth + 1) }) -join ' ').Trim()
+            if (-not $inner) { $inner = ([string]$Node.Name).Trim() }
+            if ($inner) { return ('- ' + $inner) }
+            return
+        }
+        default {
+            foreach ($child in $Node.Children) { Get-UiTextLines $child ($Depth + 1) }
+        }
+    }
+}
+
+function ConvertTo-UiNode {
+    # Plain copy of a UI Automation subtree (control view), so the text logic can be tested without Windows.
+    param($Element, [int]$Depth = 0)
+    $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker
+    $c = $Element.Current
+    $children = New-Object System.Collections.Generic.List[object]
+    if ($Depth -lt 30) {
+        $child = $walker.GetFirstChild($Element)
+        while ($null -ne $child) { $children.Add((ConvertTo-UiNode $child ($Depth + 1))); $child = $walker.GetNextSibling($child) }
+    }
+    [pscustomobject]@{ Type = $c.ControlType.ProgrammaticName.Replace('ControlType.', ''); Name = [string]$c.Name; Id = [string]$c.AutomationId; Children = $children.ToArray() }
+}
+
+function Get-TextNodeCount {
+    param($Node)
+    $n = 0
+    if ($Node.Type -eq 'Text') { $n = 1 }
+    foreach ($child in $Node.Children) { $n += Get-TextNodeCount $child }
+    $n
+}
+
+function Get-AnswerBodyNode {
+    <#
+      In the answer group the first group after the "Copilot said:" label holds
+      the answer body, followed by file cards and a "from <author>" line. The body
+      is the child group with the most text in it; those other parts are left out.
+    #>
+    param($AnswerNode)
+    $content = @($AnswerNode.Children | Where-Object { $_.Id -notlike 'copilot-message-*-title' -and $_.Type -eq 'Group' }) | Select-Object -First 1
+    if ($null -eq $content) { return $null }
+    $groups = @($content.Children | Where-Object { $_.Type -eq 'Group' })
+    if ($groups.Count -eq 0) { return $content }
+    $groups | Sort-Object -Property @{ Expression = { Get-TextNodeCount $_ }; Descending = $true } | Select-Object -First 1
+}
+
+function Get-CopilotAnswerText {
+    # Text of the newest answer, read from UI Automation; '' when there is none.
+    param([IntPtr]$Handle)
+    $titles = @(Get-AnswerTitles $Handle)
+    if ($titles.Count -eq 0) { return '' }
+    $group = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($titles[-1])
+    if ($null -eq $group) { return '' }
+    $body = Get-AnswerBodyNode (ConvertTo-UiNode $group)
+    if ($null -eq $body) { return '' }
+    (@(Get-UiTextLines $body) -join "`n`n").Trim()
+}
+
 function Wait-CopilotResponse {
-    # Done when a new copy button exists and the input is ready for several polls.
-    # The last copy button in document order belongs to the newest answer; the
-    # prompt's own copy button comes before it.
-    param([System.Diagnostics.Process]$Process, [int]$BaselineCopyButtons, [int]$TimeoutSeconds, [int]$StableChecks, [int]$PollMilliseconds)
+    <#
+      Done when a new answer exists, Copilot is no longer generating, and the
+      answer text read through UI Automation stays the same for several polls.
+      Returns the copy button of the answer too, for the optional clipboard fallback.
+    #>
+    param([System.Diagnostics.Process]$Process, [int]$BaselineAnswers, [int]$TimeoutSeconds, [int]$StableChecks, [int]$PollMilliseconds)
     $watch = [Diagnostics.Stopwatch]::StartNew()
     $stable = 0
+    $last = $null
     while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
         $Process.Refresh()
         if ($Process.HasExited -or $Process.MainWindowHandle -eq 0) { throw 'Copilot window closed while waiting for the answer.' }
-        $state = Get-CopilotUiState $Process.MainWindowHandle
-        $buttons = @(Get-CopyButtons $Process.MainWindowHandle)
-        $newCopy = $null
-        if ($buttons.Count -gt $BaselineCopyButtons) { $newCopy = $buttons[-1] }
-        if ($state.Ready -and $null -ne $newCopy) {
+        $handle = $Process.MainWindowHandle
+        $text = ''
+        if (@(Get-AnswerTitles $handle).Count -gt $BaselineAnswers -and -not (Test-CopilotBusy $handle)) { $text = Get-CopilotAnswerText $handle }
+        if ($text -and $text -eq $last) {
             $stable++
-            if ($stable -ge $StableChecks) { return $newCopy }
+            if ($stable -ge $StableChecks) {
+                $buttons = @(Get-CopyButtons $handle)
+                $copy = $null
+                if ($buttons.Count) { $copy = $buttons[-1] }
+                return [pscustomobject]@{ Text = $text; CopyButton = $copy }
+            }
         } else { $stable = 0 }
+        $last = $text
         Start-Sleep -Milliseconds $PollMilliseconds
     }
     throw "No finished Copilot answer within $TimeoutSeconds s."
@@ -423,9 +654,9 @@ function Wait-CopilotResponse {
 
 function Copy-CopilotResponse {
     <#
-      Clicks the copy button of the newest answer and reads the clipboard.
-      A sentinel proves that the click changed the clipboard; a copy of the
-      prompt is rejected.
+      Optional fallback when UI Automation gives no answer text: clicks the copy
+      button of the newest answer and reads the clipboard. A sentinel proves that
+      the click changed the clipboard; a copy of the prompt is rejected.
     #>
     param($CopyButton, [string]$Prompt)
     $sentinel = '__COMPLAINT_DOSSIER_WAITING_' + [guid]::NewGuid().ToString('N') + '__'
@@ -437,12 +668,16 @@ function Copy-CopilotResponse {
         $text = $null
         try { $text = [string](Get-Clipboard -Raw) } catch {}
         if (-not [string]::IsNullOrWhiteSpace($text) -and $text -ne $sentinel) {
-            if ((Get-TextHash $text) -eq (Get-TextHash $Prompt) -or $text.Contains('### Complaint record (from the complaint list)')) {
-                throw 'The copied text is the prompt, not the answer.'
-            }
+            if (Test-PromptEcho $text $Prompt) { throw 'The copied text is the prompt, not the answer.' }
             return $text
         }
         Start-Sleep -Milliseconds 100
     }
     throw 'Copy button clicked, but no answer arrived in the clipboard.'
+}
+
+function Test-PromptEcho {
+    # True when a text is the prompt itself rather than an answer to it.
+    param([string]$Text, [string]$Prompt)
+    (Get-TextHash $Text) -eq (Get-TextHash $Prompt) -or $Text.Contains('### Complaint record (from the complaint list)')
 }

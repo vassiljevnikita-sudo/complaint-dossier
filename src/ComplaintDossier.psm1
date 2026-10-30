@@ -655,15 +655,19 @@ function New-CasePrompt {
 
 function ConvertTo-SectionHeadings {
     <#
-      The copy button of the Copilot app copies the rendered answer as plain
-      text, without Markdown marks. A line that holds only a section name
-      (optionally followed by a colon) is turned back into a "## " heading.
-      response.md keeps the answer as copied; checks and report use this form.
+      Copilot answers arrive as plain text (copy button or UI Automation), without
+      Markdown marks; numbered headings may come as list items without their
+      number. A line that holds only a section name, with or without its number,
+      a list mark, a Markdown heading mark or a trailing colon, becomes "## <section>".
+      response.md keeps the answer as received; checks and report use this form.
     #>
     param([AllowEmptyString()][string]$Response, [string[]]$Sections)
+    $key = { param($t) ((([string]$t).Trim().TrimEnd(':').Trim() -replace '^(#{1,6}\s+|[-*\u2022]\s+)', '') -replace '^\d+[.)]\s*', '').Trim().ToLowerInvariant() }
+    $byKey = @{}
+    foreach ($section in $Sections) { $k = & $key $section; if ($k -and -not $byKey.ContainsKey($k)) { $byKey[$k] = $section } }
     $lines = foreach ($line in ($Response -split "`r?`n")) {
-        $name = $line.Trim().TrimEnd(':').Trim()
-        if ($name -and $line.Trim() -notmatch '^#' -and $Sections -contains $name) { "## $name" } else { $line }
+        $k = & $key $line
+        if ($k -and $byKey.ContainsKey($k)) { "## $($byKey[$k])" } else { $line }
     }
     $lines -join "`n"
 }
@@ -700,10 +704,13 @@ function Test-ReportResponse {
     # A bracketed token with a letter, a digit and a hyphen counts as a case ID
     # citation, e.g. [SYN-2026-004]. Footnotes like [1] and links are ignored.
     $cited = @([regex]::Matches($Response, '\[([A-Za-z][A-Za-z0-9_./]*-[A-Za-z0-9_./-]*\d[A-Za-z0-9_./-]*)\](?!\()') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique)
+    # The report must name its own case, cited in brackets or written plainly
+    # (for example in the basic data list "Case ID: SYN-2026-007").
     $own = $cited -contains $CaseId
     $detail = "[$CaseId] cited"
-    if (-not $own) { $detail = "[$CaseId] not cited" }
-    $checks.Add([pscustomobject]@{ Name = 'Report cites its own case ID'; Passed = $own; Detail = $detail })
+    if (-not $own -and $CaseId -and [regex]::IsMatch($Response, '(?<![A-Za-z0-9_-])' + [regex]::Escape($CaseId) + '(?![A-Za-z0-9_-])')) { $own = $true; $detail = "$CaseId named" }
+    if (-not $own) { $detail = "$CaseId not named" }
+    $checks.Add([pscustomobject]@{ Name = 'Report names its own case ID'; Passed = $own; Detail = $detail })
     $unknown = @($cited | Where-Object { $KnownCaseIds -notcontains $_ })
     $detail = "$($cited.Count) case IDs cited, all in the complaint list"
     if ($unknown.Count) { $detail = 'not in the complaint list: ' + ($unknown -join ', ') }

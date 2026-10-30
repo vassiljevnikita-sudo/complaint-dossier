@@ -11,8 +11,12 @@
        not keep in the chat history
     3. select the configured model; abort if the menu does not offer it
     4. attach the files listed in -AttachmentListFile (Add-CopilotAttachment.ps1)
-    5. paste the prompt, press Enter, wait until the answer is complete
-    6. copy the answer with the chat's copy button and write it to -OutputFile
+    5. type the prompt into the chat input and invoke the send button
+    6. wait until the answer is complete, read its text through UI Automation
+       and write it to -OutputFile (the copy button is only a fallback)
+  Nothing needs the foreground window or a drawn desktop: the steps use UI
+  Automation patterns and window messages to the web view. Bringing the
+  window to the front is attempted, but not required.
   Every step is recorded in -StatusFile (JSON), also when the run fails.
   Exit code 0 = answer written, 1 = aborted. ASCII only (Windows PowerShell 5.1).
 #>
@@ -48,7 +52,10 @@ $status = [ordered]@{
     modelShown      = $null
     temporaryChat   = [bool]$TemporaryChat
     uploads         = @()
+    inputDesktop    = $null
+    foreground      = $null
     inputMethod     = $null
+    answerSource    = $null
     responseChars   = 0
     steps           = @()
     error           = $null
@@ -70,11 +77,11 @@ try {
 
     Initialize-CopilotAutomation
     for ($i = $StartDelaySeconds; $i -ge 1; $i--) { Write-Host "[copilot] start in $i s"; Start-Sleep -Seconds 1 }
-    Assert-InputDesktop
+    $status.inputDesktop = Test-InputDesktop
     $copilot = Get-CopilotWindow $WindowTitle
     $script:CopilotProcessIds = @(Get-CopilotProcessIds ([int]$copilot.Id))
-    Activate-CopilotWindow $copilot
-    Add-Step "window found: $($copilot.MainWindowTitle)"
+    $status.foreground = Activate-CopilotWindow $copilot
+    Add-Step "window found: $($copilot.MainWindowTitle) (input desktop: $($status.inputDesktop), foreground: $($status.foreground))"
 
     $newChat = Find-NewChatButton $copilot.MainWindowHandle
     if ($null -eq $newChat) { throw 'New chat button not found. Aborting, so the prompt does not land in an existing conversation.' }
@@ -95,22 +102,27 @@ try {
     if ($uploads.Count) {
         & (Join-Path $PSScriptRoot 'Add-CopilotAttachment.ps1') -FilePath $uploads -WindowTitle $copilot.MainWindowTitle -TimeoutMilliseconds ($UploadTimeoutSeconds * 1000)
         $status.uploads = @($uploads | ForEach-Object { [IO.Path]::GetFileName($_) })
-        Activate-CopilotWindow $copilot
         Wait-CopilotReady $copilot $NewChatTimeoutSeconds $StableReadyChecks $PollMilliseconds
         Add-Step "$($uploads.Count) file(s) attached"
     }
 
-    $baseline = @(Get-CopyButtons $copilot.MainWindowHandle).Count
+    $baseline = @(Get-AnswerTitles $copilot.MainWindowHandle).Count
     $status.inputMethod = Send-CopilotPrompt $copilot $prompt
     Add-Step "prompt sent ($($status.inputMethod))"
     Start-Sleep -Seconds 3
 
-    $copyButton = Wait-CopilotResponse $copilot $baseline $ResponseTimeoutSeconds $StableReadyChecks $PollMilliseconds
-    $response = Copy-CopilotResponse $copyButton $prompt
-    Set-Clipboard -Value ' '
+    $answer = Wait-CopilotResponse $copilot $baseline $ResponseTimeoutSeconds $StableReadyChecks $PollMilliseconds
+    $response = $answer.Text
+    $status.answerSource = 'UIAutomation'
+    if ([string]::IsNullOrWhiteSpace($response)) {
+        if ($null -eq $answer.CopyButton) { throw 'The answer has no readable text and no copy button.' }
+        $response = Copy-CopilotResponse $answer.CopyButton $prompt
+        $status.answerSource = 'CopyButton'
+    }
+    if (Test-PromptEcho $response $prompt) { throw 'The text read from the chat is the prompt, not the answer.' }
     [IO.File]::WriteAllText($OutputFile, $response, $utf8)
     $status.responseChars = $response.Length
-    Add-Step 'response copied'
+    Add-Step "response read ($($status.answerSource))"
     $exitCode = 0
 } catch {
     $status.error = $_.Exception.Message

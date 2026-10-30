@@ -85,6 +85,76 @@ Describe 'Select-PreferredModel' {
     }
 }
 
+Describe 'Prompt input without foreground' {
+    BeforeAll {
+        function New-FakeInput { $o = [pscustomobject]@{ Name = 'input' }; $o | Add-Member -MemberType ScriptMethod -Name SetFocus -Value {}; $o }
+        $script:Prompt = "# Heading`n`n- first point`n1. Section one`nText with [SYN-1] and 3 numbers."
+    }
+    BeforeEach {
+        Mock Find-CopilotInput { New-FakeInput }
+        Mock Get-RenderWidget { [IntPtr]42 }
+        Mock Send-TextMessages {}
+        Mock Clear-CopilotInput {}
+        Mock Send-KeyMessage {}
+        Mock Find-SendButton { 'send-button' }
+        $script:clicked = @()
+        Mock Click-UiElement { $script:clicked += $Element }
+    }
+    It 'compares the typed text without white space and Markdown marks' {
+        Get-ComparableText "a  b`n`nc" -Strict | Should -Be 'abc'
+        Get-ComparableText "## Head`n- item`n2. Step" | Should -Be (Get-ComparableText "Head item Step")
+        Get-ComparableText 'Case [SYN-1] costs 3.' | Should -Not -Be (Get-ComparableText 'Case [SYN-2] costs 3.')
+    }
+    It 'types the prompt and sends it with the send button when the input holds it' {
+        Mock Get-InputValue { if ($script:typed) { "Heading`nfirst point`nSection one`nText with [SYN-1] and 3 numbers." } else { '' } }
+        Mock Send-TextMessages { $script:typed = $true }
+        $script:typed = $false
+        $method = Send-CopilotPrompt -Process ([pscustomobject]@{ MainWindowHandle = [IntPtr]1 }) -Text $script:Prompt -TimeoutSeconds 5
+        $method | Should -Match '^WindowMessages.*\+SendButton$'
+        $script:clicked | Should -Be @('send-button')
+    }
+    It 'does not send when the input does not hold the whole prompt' {
+        Mock Get-InputValue { 'Heading first point' }
+        { Send-CopilotPrompt -Process ([pscustomobject]@{ MainWindowHandle = [IntPtr]1 }) -Text $script:Prompt -TimeoutSeconds 2 -StallSeconds 1 } |
+            Should -Throw '*does not hold the prompt*Nothing was sent*'
+        $script:clicked.Count | Should -Be 0
+        Should -Invoke Send-KeyMessage -Times 0
+    }
+}
+
+Describe 'Reading the answer from the UI Automation tree' {
+    BeforeAll {
+        function N([string]$Type, [string]$Name = '', [object[]]$Children = @(), [string]$Id = '') { [pscustomobject]@{ Type = $Type; Name = $Name; Id = $Id; Children = $Children } }
+        # Shape of the Copilot answer as UI Automation shows it (30 October 2026).
+        $script:Answer = N 'Group' 'Copilot said: ...' @(
+            (N 'Text' 'Copilot said:' -Id 'copilot-message-_r_1_-title'),
+            (N 'Group' '' @(
+                    (N 'Group' '' @(
+                            (N 'Text' 'Complaint'),
+                            (N 'Text' 'Case [SYN-1] was received.'),
+                            (N 'Button' 'Citation: shipment-log.csv'),
+                            (N 'List' '' @((N 'ListItem' '' @((N 'Text' 'first point'))), (N 'ListItem' '' @((N 'Text' 'second point'))))),
+                            (N 'List' '' @((N 'ListItem' 'Conclusion'))),
+                            (N 'Text' 'Not justified.')
+                        )),
+                    (N 'Button' 'shipment-log'),
+                    (N 'Text' 'From '),
+                    (N 'Group' 'From A. Person' @((N 'Text' 'A. Person')))
+                )),
+            (N 'ToolBar' '' @((N 'Button' 'Copy response')))
+        )
+    }
+    It 'returns headings and paragraphs as lines, without citations, file card, author line or toolbar' {
+        $lines = @(Get-UiTextLines (Get-AnswerBodyNode $script:Answer))
+        $lines -join '|' | Should -Be 'Complaint|Case [SYN-1] was received.|- first point|- second point|- Conclusion|Not justified.'
+    }
+    It 'recognises a text that is the prompt' {
+        Test-PromptEcho "### Complaint record (from the complaint list)`n| a |" 'prompt' | Should -BeTrue
+        Test-PromptEcho 'the prompt' 'the prompt' | Should -BeTrue
+        Test-PromptEcho 'Complaint report text' 'the prompt' | Should -BeFalse
+    }
+}
+
 Describe 'Round-trip script on Windows' -Tag 'Windows' -Skip:($env:OS -ne 'Windows_NT') {
     BeforeAll {
         $script:Script = Join-Path $script:Root 'src/Copilot/Invoke-CopilotRoundtrip.ps1'

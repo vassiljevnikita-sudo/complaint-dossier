@@ -210,8 +210,14 @@ Describe 'Response checks' {
     It 'fails on a missing section, a missing own case ID and an invented case ID' {
         $checks = Test-ReportResponse -Response "## Complaint`nSee [SYN-9]." -Prompt 'p' -CaseId 'SYN-1' -RequiredSections $script:Sections -KnownCaseIds $script:Known
         ($checks | Where-Object Name -eq 'Required sections present').Detail | Should -Be 'missing: Conclusion'
-        ($checks | Where-Object Name -eq 'Report cites its own case ID').Passed | Should -BeFalse
+        ($checks | Where-Object Name -eq 'Report names its own case ID').Passed | Should -BeFalse
         ($checks | Where-Object Name -eq 'Cited case IDs exist').Detail | Should -Be 'not in the complaint list: SYN-9'
+    }
+    It 'accepts the own case ID written without brackets, but not as part of another ID' {
+        $plain = Test-ReportResponse -Response "## Complaint`nCase ID: SYN-1" -Prompt 'p' -CaseId 'SYN-1' -RequiredSections @() -KnownCaseIds $script:Known
+        ($plain | Where-Object Name -eq 'Report names its own case ID').Detail | Should -Be 'SYN-1 named'
+        $other = Test-ReportResponse -Response "## Complaint`nCase ID: SYN-10" -Prompt 'p' -CaseId 'SYN-1' -RequiredSections @() -KnownCaseIds $script:Known
+        ($other | Where-Object Name -eq 'Report names its own case ID').Passed | Should -BeFalse
     }
     It 'fails when the answer is the prompt or contains its data headings' {
         $checks = Test-ReportResponse -Response 'same text' -Prompt 'same text' -CaseId 'SYN-1' -RequiredSections @() -KnownCaseIds @()
@@ -227,6 +233,11 @@ Describe 'Response checks' {
         $text | Should -Match '(?m)^Complaint text that is not a heading\.$'
         $checks = Test-ReportResponse -Response $text -Prompt 'p' -CaseId 'SYN-1' -RequiredSections $script:Sections -KnownCaseIds $script:Known
         @($checks | Where-Object { -not $_.Passed }).Count | Should -Be 0
+    }
+    It 'recognises numbered headings that arrive as list items without their number' {
+        $sections = @('Basic complaint data', '1. Technical description', '2. Conclusion')
+        $text = ConvertTo-SectionHeadings "Basic complaint data`n- Technical description`nText.`n2. Conclusion:`n## Conclusion" $sections
+        $text | Should -Be "## Basic complaint data`n## 1. Technical description`nText.`n## 2. Conclusion`n## 2. Conclusion"
     }
     It 'fails when the answer does not end with a classification' {
         $classes = @('The complaint is classified as justified.', 'The complaint is classified as not justified.')

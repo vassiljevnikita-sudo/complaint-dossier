@@ -4,11 +4,11 @@ Complaint Dossier drafts one Word report per product complaint from an Excel com
 
 Writing each report by hand means reading the complaint's row, looking up earlier complaints for the same batch and product, reading the case folder and writing the same structure again. The tool does the preparation: it builds one prompt per complaint from that row, the similar complaints and the case folder, lets Copilot draft the report and writes it to Word.
 
-Status: the demo mode is tested in CI on every push. It uses prewritten answers instead of Copilot. The live path through the Copilot desktop app completed one full round trip on 30 October 2026, but not yet with the final code ([details](#live-copilot-test-30-october-2026)).
+Status: the demo mode is tested in CI on every push. It uses prewritten answers instead of Copilot. The live path through the Microsoft 365 Copilot desktop app was tested by hand on 30 October 2026 with a short and a long report on synthetic cases, and both passed every automated check ([details](#live-copilot-test-30-october-2026)).
 
 [Sample report (PDF)](docs/sample/complaint-dossier-sample-DRAFT.pdf) · [all files of the sample run](docs/sample/) · [Design note: intended use, GAMP 5, risks, what validation would still need](docs/design-note.md)
 
-**Kurzfassung (Deutsch):** PowerShell-Werkzeug, das aus einer Reklamationsliste in Excel für jede einzelne Reklamation einen Berichtsentwurf erstellt. Pro Fall baut es einen Prompt aus der Zeile der Liste, ähnlichen Reklamationen (gleiche Charge, gleiche Produktgruppe und Kategorie) und den Dokumenten des Fallordners. Microsoft 365 Copilot entwirft den Bericht (Kurz- oder Langbericht), das Werkzeug schreibt ihn als Word-Datei mit eigenem Audit-Log (SHA-256-Hashes). Jeder Bericht bleibt ein Entwurf, bis eine prüfende Person ihn einzeln freigibt. Nur die Reklamationen selbst gehören zum Reklamationsprozess; das Werkzeug bereitet Entwürfe vor. Der Demo-Modus ist in CI getestet. Der Live-Ablauf mit der Copilot-App lief am 30.10.2026 einmal vollständig durch; die Bestätigung mit dem endgültigen Code steht noch aus. Entworfen nach den Grundsätzen von GAMP 5; nicht validiert. Alle Beispieldaten sind synthetisch.
+**Kurzfassung (Deutsch):** PowerShell-Werkzeug, das aus einer Reklamationsliste in Excel für jede einzelne Reklamation einen Berichtsentwurf erstellt. Pro Fall baut es einen Prompt aus der Zeile der Liste, ähnlichen Reklamationen (gleiche Charge, gleiche Produktgruppe und Kategorie) und den Dokumenten des Fallordners. Microsoft 365 Copilot entwirft den Bericht (Kurz- oder Langbericht), das Werkzeug schreibt ihn als Word-Datei mit eigenem Audit-Log (SHA-256-Hashes). Jeder Bericht bleibt ein Entwurf, bis eine prüfende Person ihn einzeln freigibt. Nur die Reklamationen selbst gehören zum Reklamationsprozess; das Werkzeug bereitet Entwürfe vor. Der Demo-Modus ist in CI getestet. Der Live-Ablauf mit der Copilot-Desktop-App wurde am 30.10.2026 von Hand mit einem Kurz- und einem Langbericht zu synthetischen Fällen getestet; beide bestanden alle automatischen Prüfungen. Entworfen nach den Grundsätzen von GAMP 5; nicht validiert. Alle Beispieldaten sind synthetisch.
 
 ![Demo run: one draft report per open case, approval of one report, its audit log](docs/images/demo.gif)
 
@@ -36,7 +36,7 @@ PowerShell 7 or Windows PowerShell 5.1 (the demo runs on either; the live Copilo
 ## Limitations
 
 - A prototype, designed along GAMP 5 principles. It is not validated, and the reviewer name is typed, not an authenticated electronic signature. See [docs/design-note.md](docs/design-note.md).
-- The live Copilot path drives the app's user interface. App updates or another UI language can break it. CI cannot test it, because GitHub runners have no Copilot licence. The full live round trip has worked once, with an earlier version of the prompts; see [What is tested where](#what-is-tested-where).
+- The live Copilot path drives the app's user interface through UI Automation and window messages. App updates or another UI language can break it. CI cannot test it, because GitHub runners have no Copilot licence; it was tested by hand on one machine with one app version, see [What is tested where](#what-is-tested-where).
 - The prompts carry process rules from the original workflow, set in `config.example.json` under `Reports.*.ProcessFacts` (for example "The batch record was reviewed and showed no findings."). Copilot treats them as facts for every report. Replace them with what your own process guarantees before any real use.
 - Each audit.json detects changed files through SHA-256 hashes, but it is an ordinary file without access control. Approval reads the results of the automated checks from it, so whoever can edit that file can also hide a failed check.
 - Masking covers the case description and the case document text inserted into the prompt, and there it removes only e-mail addresses and phone numbers. Uploaded files are sent to Copilot unchanged and must be reviewed or redacted separately. Masking is not anonymisation.
@@ -80,7 +80,7 @@ The tool, not the model, computes the similar complaints: other complaints with 
 
 ### Live mode with Microsoft 365 Copilot
 
-Live mode needs Windows, the Microsoft 365 Copilot desktop app signed in with a Copilot licence, and an unlocked desktop that is shown on a screen (a minimised remote desktop window is not enough). Windows PowerShell 5.1 is enough; the UI automation always runs in it.
+Live mode needs Windows, the Microsoft 365 Copilot desktop app open and signed in with a Copilot licence, and the tool running in the same Windows session as the app. It does not need the foreground window, the clipboard or a desktop that is drawn on a screen: every step uses UI Automation patterns or window messages addressed to the Copilot window. Windows PowerShell 5.1 is enough; the UI automation always runs in it.
 
 1. Copy `config.example.json` to `config.json`. `config.json` is in `.gitignore`.
 2. Point `Workbook.Path` and `CaseFolders.Path` at your data. Relative paths resolve against the project folder.
@@ -92,7 +92,7 @@ Live mode needs Windows, the Microsoft 365 Copilot desktop app signed in with a 
 ./Invoke-ComplaintDossier.ps1 -Live -CaseId SYN-2026-006
 ```
 
-For each complaint the tool opens a new temporary chat, selects the configured model, attaches that complaint's files through the app's own file dialog, sends the prompt, waits for the complete answer and copies it with the answer's copy button. Do not use mouse or keyboard while it runs. Each step is logged in `copilot-status.json` and in `audit.json` of the complaint. The app copies the answer as plain text, so a line that holds only a section name counts as that section's heading; `response.md` keeps the answer exactly as copied.
+For each complaint the tool opens a new temporary chat, selects the configured model, attaches that complaint's files through the app's own file dialog, types the prompt into the chat input, reads the input back and sends only if it holds the complete prompt, waits for the complete answer and reads its text through UI Automation (the answer's copy button is only a fallback). Do not type into the Copilot window while it runs. Each step is logged in `copilot-status.json` and in `audit.json` of the complaint. The answer arrives as plain text, and numbered headings may arrive without their number, so a line that holds only a section name counts as that section's heading; `response.md` keeps the answer exactly as received. In a disconnected remote desktop session the app processes the typed text slowly; the tool then waits up to 15 minutes before it gives up without sending.
 
 ### Review and approval of each report
 
@@ -125,18 +125,25 @@ The workbook columns are mapped in `Workbook.Columns`, so the tool works with ot
 | Demo reports as downloadable .docx files | CI | Artifact `complaint-dossier-demo` (needs a GitHub login) |
 | Committed samples in `docs/sample/` still match what the code produces | CI | Pester compares the report text and the hashes in each audit.json |
 | Employer denylist and secrets over the full history | CI | Denylist from a repository secret, gitleaks |
-| Live Copilot round trip | Manual, see below | Not reproducible in CI |
+| Live Copilot round trip | Manual, 30 October 2026, see below | Not reproducible in CI |
 
 ### Live Copilot test (30 October 2026)
 
-Run against the Microsoft 365 Copilot desktop app (German UI) under Windows PowerShell 5.1, with the model "Quick Response" and synthetic cases only.
+Run against the Microsoft 365 Copilot desktop app (German UI) under Windows PowerShell 5.1, with the model "Quick Response" and synthetic cases only, using the code of this repository's `main` branch.
 
-- An earlier version stopped at the temporary-chat toggle. The tool aborted as designed and sent nothing. Fixed.
-- Run 1, case SYN-2026-006: new temporary chat, model selection, upload of the case's CSV file and sending the prompt passed. The tool then copied the prompt instead of the answer, because the answer's copy button was below the visible area. The answer is now taken from the last copy button in the chat.
-- Run 2, case SYN-2026-006: the full round trip worked end to end without any user input. New temporary chat, model selected and confirmed, CSV uploaded, prompt sent, answer copied, DRAFT Word report and audit.json written. One automated check failed: the app copies the answer as plain text, so the Markdown headings were missing. Lines that hold only a section name now count as headings.
-- After run 2 the prompts were replaced with the versions adapted from the original tool. Two further runs with the final code (cases SYN-2026-006 and SYN-2026-007) did not finish: the Copilot window turned blank and could not be brought to the foreground, most likely because the remote desktop session was not displayed. In the last run nothing was sent.
+| Run | What happened |
+| --- | --- |
+| SYN-2026-006, short report, with the CSV file of the case | Passed. New temporary chat, model selected and confirmed, CSV uploaded through the app's file dialog, prompt typed and read back, sent, answer read through UI Automation, DRAFT Word report and audit.json written. All 6 automated checks passed, including the frequency sentence "The reported defect is classified as occasional." |
+| SYN-2026-007, long report | Passed the same way, all 7 automated checks, including the no-sample sentence and the closing classification "The complaint is classified as not justified." |
+| SYN-2026-006 with a model name the menu does not offer | Stopped as designed with "Configured model not found in the Copilot menu", before anything was sent. |
 
-So the live path has worked once end to end; confirmation with the final code and prompts is still pending. Until then, treat live mode as not confirmed.
+How the live path got there on the same day:
+
+- The first version stopped at the temporary-chat toggle, then copied the prompt instead of the answer (the answer's copy button was below the visible area), and then missed the section headings because the app copies plain text. Each was fixed. One run with the earlier prompts went through end to end.
+- After that, runs stopped because the Copilot window could not be brought to the foreground and the screen could not be read: the remote desktop session was not being drawn, and later it was disconnected. The live path was rebuilt so it needs neither: buttons, toggles and menus use UI Automation patterns, the prompt is typed with window messages to the app's web view (line breaks as Shift+Enter) and checked by read-back before sending, and the answer is read from the UI Automation tree.
+- In the last runs the app listed numbered headings as list items without their number, and Copilot wrote its own case ID without brackets. Headings are now matched with or without their number; the own case ID counts when it is named, bracketed or not.
+
+The passed runs were made while the remote desktop session was disconnected and the Copilot window was not in the foreground. The test covers one machine, one app version and one UI language; it is not a validation.
 
 ## Project layout
 
