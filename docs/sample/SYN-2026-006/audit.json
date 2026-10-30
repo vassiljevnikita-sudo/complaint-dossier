@@ -4,7 +4,7 @@
     "name": "Complaint Dossier",
     "version": "0.3.0"
   },
-  "runId": "20261030T095212Z-0d886d",
+  "runId": "20261030T115829Z-9196ec",
   "caseId": "SYN-2026-006",
   "reportType": "short",
   "mode": "demo",
@@ -64,7 +64,7 @@
     },
     "report": {
       "file": "SYN-2026-006-short-report-DRAFT.docx",
-      "sha256": "11ce8eccdb2a1ab558bed812d2d531773d948134593e50ed1337670ac3708a87"
+      "sha256": "46c97ac1a236b9c9f1acab00a63b9b7e53595840a2d2308d5d81d3e722a703e3"
     }
   },
   "checks": [
@@ -84,7 +84,7 @@
       "detail": "all present"
     },
     {
-      "name": "Report cites its own case ID",
+      "name": "Report names its own case ID",
       "passed": true,
       "detail": "[SYN-2026-006] cited"
     },
@@ -106,22 +106,22 @@
   },
   "events": [
     {
-      "atUtc": "2026-10-30T09:52:12Z",
+      "atUtc": "2026-10-30T11:58:29Z",
       "event": "case-started",
       "detail": "SYN-2026-006, short report, mode=demo"
     },
     {
-      "atUtc": "2026-10-30T09:52:12Z",
+      "atUtc": "2026-10-30T11:58:29Z",
       "event": "prompt-built",
       "detail": "4702 characters, 1 document(s), 0 upload(s)"
     },
     {
-      "atUtc": "2026-10-30T09:52:12Z",
+      "atUtc": "2026-10-30T11:58:29Z",
       "event": "response-received",
       "detail": "demo answer copied"
     },
     {
-      "atUtc": "2026-10-30T09:52:12Z",
+      "atUtc": "2026-10-30T11:58:29Z",
       "event": "report-written",
       "detail": "SYN-2026-006-short-report-DRAFT.docx"
     }

@@ -19,7 +19,7 @@ Each folder holds the files of one report as the tool wrote them:
 
 ## How it was made
 
-- The run: `./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo`, step "Demo run, one report per open case (PowerShell 7)" of CI run [41036469722](https://github.com/vassiljevnikita-sudo/complaint-dossier/actions/runs/41036469722) for pull request [#6](https://github.com/vassiljevnikita-sudo/complaint-dossier/pull/6), `windows-latest`, PowerShell 7.6.7, run ID `20261030T095212Z-0d886d`. The two folders are copied unchanged from the build artifact of that run. Its Pester step failed only because this folder did not exist yet.
+- The run: `./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo`, step "Demo run, one report per open case (PowerShell 7)" of CI run [41051796291](https://github.com/vassiljevnikita-sudo/complaint-dossier/actions/runs/41051796291) for pull request [#8](https://github.com/vassiljevnikita-sudo/complaint-dossier/pull/8), `windows-latest`, PowerShell 7.6.7, run ID `20261030T115829Z-9196ec`. The two folders are copied unchanged from the build artifact of that run. Its Pester step failed only because this folder still held the reports of the previous code version.
 - The PDFs: rendered from the .docx files with LibreOffice 24.2, `soffice --headless --convert-to pdf <report>.docx`. They are not listed in audit.json.
 
 ## How it stays current
