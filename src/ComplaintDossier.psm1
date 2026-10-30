@@ -7,17 +7,18 @@ Set-StrictMode -Version Latest
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
-$script:ToolVersion = '0.1.0'
+$script:ToolVersion = '0.2.0'
 $script:Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $script:FixedZipTime = [DateTimeOffset]::new(2026, 1, 1, 0, 0, 0, [TimeSpan]::Zero)
 
 # Text markers that Approve-ComplaintDossier replaces. Each must appear in the draft.
 $script:Markers = [ordered]@{
-    Banner   = 'DRAFT - NOT REVIEWED - NOT FOR USE'
-    Status   = 'Status: DRAFT (awaiting human review)'
-    Reviewer = 'Reviewer: (not signed)'
-    SignedAt = 'Signed at (UTC): (not signed)'
-    Comment  = 'Review comment: (none)'
+    Banner    = 'DRAFT - NOT REVIEWED - NOT FOR USE'
+    Status    = 'Status: DRAFT (awaiting human review)'
+    Reviewer  = 'Reviewer: (not signed)'
+    SignedAt  = 'Signed at (UTC): (not signed)'
+    Comment   = 'Review comment: (none)'
+    Exception = 'Accepted check failures: (not signed)'
 }
 
 function Get-DossierVersion { $script:ToolVersion }
@@ -510,14 +511,18 @@ function New-WParagraph {
 }
 
 function New-WTable {
-    param([string[]]$Header, [object[]]$Rows)
+    <# $ColumnColor maps a column index to a text colour for the body rows, e.g. @{ 2 = '9E9E9E' }. #>
+    param([string[]]$Header, [object[]]$Rows, [hashtable]$ColumnColor = @{})
     $cell = {
-        param($text, $bold)
-        "<w:tc><w:tcPr><w:tcW w:w=`"0`" w:type=`"auto`"/></w:tcPr><w:p><w:pPr><w:pStyle w:val=`"TableText`"/></w:pPr>$(New-WRun ([string]$text) -Bold:$bold)</w:p></w:tc>"
+        param($text, $bold, $color)
+        "<w:tc><w:tcPr><w:tcW w:w=`"0`" w:type=`"auto`"/></w:tcPr><w:p><w:pPr><w:pStyle w:val=`"TableText`"/></w:pPr>$(New-WRun ([string]$text) -Bold:$bold -Color $color)</w:p></w:tc>"
     }
     $xml = '<w:tbl><w:tblPr><w:tblStyle w:val="DossierTable"/><w:tblW w:w="5000" w:type="pct"/></w:tblPr>'
-    $xml += '<w:tr><w:trPr><w:tblHeader/></w:trPr>' + ((@($Header | ForEach-Object { & $cell $_ $true })) -join '') + '</w:tr>'
-    foreach ($row in $Rows) { $xml += '<w:tr>' + ((@($row | ForEach-Object { & $cell $_ $false })) -join '') + '</w:tr>' }
+    $xml += '<w:tr><w:trPr><w:tblHeader/></w:trPr>' + ((@($Header | ForEach-Object { & $cell $_ $true '' })) -join '') + '</w:tr>'
+    foreach ($row in $Rows) {
+        $cells = @($row)
+        $xml += '<w:tr>' + ((@(for ($i = 0; $i -lt $cells.Count; $i++) { & $cell $cells[$i] $false ([string]$ColumnColor[$i]) })) -join '') + '</w:tr>'
+    }
     $xml + '</w:tbl>'
 }
 
@@ -645,7 +650,7 @@ function New-DossierReport {
                     $bar = ''
                     if ($peak -gt 0) { $bar = ([string][char]0x2588) * [int][math]::Round(10.0 * $_.Count / $peak) }
                     , @($_.Month, $_.Count, $bar)
-                })))
+                }) -ColumnColor @{ 2 = '9E9E9E' }))
 
     [void]$body.Append((New-WParagraph '2 Case list' -Style 'Heading1'))
     [void]$body.Append((New-WTable @('Case ID', 'Received', 'Category', 'Severity', 'Status') @($Cases | ForEach-Object { , @($_.CaseId, $_.ReceivedDate.ToString('yyyy-MM-dd'), $_.Category, $_.Severity, $_.Status) })))
@@ -663,7 +668,8 @@ function New-DossierReport {
 
     [void]$body.Append((New-WParagraph '5 Review and sign-off' -Style 'Heading1'))
     [void]$body.Append((New-WParagraph 'This report is a draft until a reviewer has checked every statement in section 3 against the case records and signs it with Approve-ComplaintDossier.ps1. The signature and the file hashes are recorded in audit.json.'))
-    foreach ($key in 'Status', 'Reviewer', 'SignedAt', 'Comment') { [void]$body.Append((New-WParagraph $m[$key])) }
+    [void]$body.Append((New-WParagraph 'Approval is refused while an automated check in section 4 has failed. A reviewer can accept failed checks only by giving a written justification, which is printed here and stored in audit.json as a documented exception.'))
+    foreach ($key in 'Status', 'Reviewer', 'SignedAt', 'Comment', 'Exception') { [void]$body.Append((New-WParagraph $m[$key])) }
 
     $bodyXml = $body.ToString()
     $bannerXml = New-WParagraph $m.Banner -Bold -Color 'C00000'
@@ -774,7 +780,8 @@ function Invoke-CopilotHandoff {
 
 function Save-AuditLog {
     param([Parameter(Mandatory)]$Audit, [Parameter(Mandatory)][string]$Path)
-    Write-Utf8File $Path (($Audit | ConvertTo-Json -Depth 10) + "`n")
+    # LF line ends on every platform, like statistics.json.
+    Write-Utf8File $Path (($Audit | ConvertTo-Json -Depth 10).Replace("`r`n", "`n") + "`n")
 }
 
 function Approve-DossierRun {
@@ -782,17 +789,44 @@ function Approve-DossierRun {
       Human sign-off. Verifies that prompt, response and draft report still match
       the hashes in audit.json, writes a signed copy of the report without the
       DRAFT markers, and records reviewer, time and new hash. The draft stays.
+
+      Approval is refused while any automated response check in audit.json has
+      failed. -AcceptFailedChecks with a non-empty -Justification overrides that;
+      the override is printed in the signed report and stored in audit.json as a
+      documented exception.
     #>
     param(
         [Parameter(Mandatory)][string]$RunPath,
         [Parameter(Mandatory)][string]$Reviewer,
-        [string]$Comment = ''
+        [string]$Comment = '',
+        [switch]$AcceptFailedChecks,
+        [string]$Justification = ''
     )
     if ([string]::IsNullOrWhiteSpace($Reviewer)) { throw 'Reviewer name is required.' }
+    if ($AcceptFailedChecks -and [string]::IsNullOrWhiteSpace($Justification)) {
+        throw '-AcceptFailedChecks needs a -Justification that says why the failed checks are acceptable. Approval refused.'
+    }
+    if (-not $AcceptFailedChecks -and -not [string]::IsNullOrWhiteSpace($Justification)) {
+        throw '-Justification is only used together with -AcceptFailedChecks. Approval refused.'
+    }
     $auditPath = Join-Path $RunPath 'audit.json'
     if (-not (Test-Path -LiteralPath $auditPath)) { throw "audit.json not found in $RunPath" }
     $audit = Read-JsonFile $auditPath
     if ($audit.status -ne 'DRAFT') { throw "Run $($audit.runId) has status $($audit.status); only DRAFT runs can be approved." }
+    if ($audit.PSObject.Properties.Name -notcontains 'checks' -or @($audit.checks).Count -eq 0) {
+        throw "audit.json of run $($audit.runId) records no automated checks. Approval refused."
+    }
+    $failed = @($audit.checks | Where-Object { $_.passed -ne $true })
+    $failedText = @($failed | ForEach-Object {
+            if ($_.detail) { "$($_.name) ($($_.detail))" } else { [string]$_.name }
+        }) -join '; '
+    if ($failed.Count -and -not $AcceptFailedChecks) {
+        throw ("Approval refused: $($failed.Count) automated check(s) failed: $failedText. The run stays DRAFT. " +
+            "Start a new run, or accept the failures as a documented exception with -AcceptFailedChecks -Justification '<reason>'.")
+    }
+    if ($AcceptFailedChecks -and -not $failed.Count) {
+        throw 'All automated checks passed; -AcceptFailedChecks is not needed. Approval refused.'
+    }
 
     foreach ($name in 'prompt', 'response', 'statistics', 'report') {
         $artifact = $audit.artifacts.$name
@@ -813,6 +847,18 @@ function Approve-DossierRun {
     $commentText = 'Review comment: none given'
     if ($Comment) { $commentText = "Review comment: $Comment" }
     $replace[$m.Comment] = $commentText
+    $exception = $null
+    if ($AcceptFailedChecks) {
+        $exception = [pscustomobject]@{
+            acceptedFailedChecks = @($failed | ForEach-Object { [pscustomobject]@{ name = $_.name; detail = $_.detail } })
+            justification        = $Justification.Trim()
+        }
+        $replace[$m.Banner] = "REVIEWED AND APPROVED WITH A DOCUMENTED EXCEPTION by $Reviewer on $signedAt"
+        $replace[$m.Status] = 'Status: APPROVED with a documented exception (failed automated checks accepted)'
+        $replace[$m.Exception] = "Accepted check failures: DOCUMENTED EXCEPTION. Failed checks: $failedText. Justification: $($exception.justification)"
+    } else {
+        $replace[$m.Exception] = 'Accepted check failures: none (all automated checks passed)'
+    }
 
     $draft = Join-Path $RunPath $audit.artifacts.report.file
     $approvedName = $audit.artifacts.report.file -replace '-DRAFT\.docx$', '.docx'
@@ -853,11 +899,16 @@ function Approve-DossierRun {
         comment         = $Comment
         osAccount       = [Environment]::UserName
         draftSha256     = $audit.artifacts.report.sha256
+        exception       = $exception
     }
     $audit.artifacts | Add-Member -NotePropertyName approvedReport -NotePropertyValue ([pscustomobject]@{ file = $approvedName; sha256 = (Get-Sha256 $approved) }) -Force
-    $audit.events += [pscustomobject]@{ atUtc = $signedAt; event = 'approved'; detail = "by $Reviewer" }
+    if ($exception) {
+        $audit.events += [pscustomobject]@{ atUtc = $signedAt; event = 'approved-with-exception'; detail = "by $Reviewer; accepted failed checks: $failedText" }
+    } else {
+        $audit.events += [pscustomobject]@{ atUtc = $signedAt; event = 'approved'; detail = "by $Reviewer" }
+    }
     Save-AuditLog $audit $auditPath
-    [pscustomobject]@{ RunId = $audit.runId; Report = $approved; Sha256 = $audit.artifacts.approvedReport.sha256; SignedAt = $signedAt }
+    [pscustomobject]@{ RunId = $audit.runId; Report = $approved; Sha256 = $audit.artifacts.approvedReport.sha256; SignedAt = $signedAt; Exception = $exception }
 }
 
 Export-ModuleMember -Function *-*

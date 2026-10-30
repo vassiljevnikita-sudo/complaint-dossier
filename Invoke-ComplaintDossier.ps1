@@ -89,7 +89,8 @@ $prompt = New-DossierPrompt -Template (Read-Utf8File $config.Paths.PromptTemplat
 $promptFile = Join-Path $runPath 'prompt.txt'
 Write-Utf8File $promptFile $prompt
 $statisticsFile = Join-Path $runPath 'statistics.json'
-Write-Utf8File $statisticsFile (($statistics | ConvertTo-Json -Depth 5) + "`n")
+# JSON with LF line ends, so the hash is the same on every platform.
+Write-Utf8File $statisticsFile (($statistics | ConvertTo-Json -Depth 5).Replace("`r`n", "`n") + "`n")
 Add-Event 'prompt-built' "$($prompt.Length) characters"
 
 # 3. Response
@@ -169,7 +170,13 @@ Save-AuditLog $audit $auditFile
 $displayRun = Get-RelativeDisplayPath $root $runPath -FullPathOutside
 Write-Host "[report] $displayRun/$reportName"
 Write-Host "[audit]  $displayRun/audit.json (report sha256 $($audit.artifacts.report.sha256))"
-Write-Host "[next]   status DRAFT. After review: ./Approve-ComplaintDossier.ps1 -RunPath $displayRun -Reviewer 'Your Name'"
+$failedCount = @($checks | Where-Object { -not $_.Passed }).Count
+if ($failedCount) {
+    Write-Host "[next]   status DRAFT. $failedCount automated check(s) failed, so normal approval is refused. Start a new run, or after review accept the failures as a documented exception:"
+    Write-Host "         ./Approve-ComplaintDossier.ps1 -RunPath $displayRun -Reviewer 'Your Name' -AcceptFailedChecks -Justification '<reason>'"
+} else {
+    Write-Host "[next]   status DRAFT. After review: ./Approve-ComplaintDossier.ps1 -RunPath $displayRun -Reviewer 'Your Name'"
+}
 if ($PassThru) {
     [pscustomobject]@{ RunId = $runId; RunPath = $runPath; Report = $reportFile; Audit = $auditFile; Checks = $checks }
 }
