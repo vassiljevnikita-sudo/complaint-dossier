@@ -50,7 +50,7 @@ $documents = @{
     'SYN-2026-008' = @{ 'transport-note.txt' = "Transport note for SYN-2026-008.`nTwo cartons dented, outer shipping box intact. Packing list shows the cartons were at the top of the box under a heavier item." }
     'SYN-2026-010' = @{
         'customer-email.txt' = "Customer e-mail for SYN-2026-010 (copied into the case file).`nFrom: pat.example@example.org`nThe blister was already cracked when I opened the box. One tablet is broken in half. Please call me back on +49 30 5550 1234."
-        'sample-check.txt'   = "Sample check for SYN-2026-010.`nReturned blister strip received on 2026-06-09. The crack runs across cavities 4 and 5. The tablet in cavity 4 is broken in two pieces, the tablet in cavity 5 is intact. The foil is sealed at all other cavities. The carton shows no crush marks.`nVisual check of three retained blister strips of batch SYN-LOT-26A019: no cracks found.`nNot done yet: check of the blister foil lot used for this batch."
+        'sample-check.txt'   = "Sample check for SYN-2026-010.`nReturned blister strip received on 2026-06-09. The crack runs across cavities 4 and 5. The tablet in cavity 4 is broken in two pieces, the tablet in cavity 5 is intact. The foil is sealed at all other cavities. The carton shows no crush marks.`nThe other two blister strips in the returned carton show no cracks.`nNot done yet: check of the blister foil lot used for this batch."
     }
 }
 

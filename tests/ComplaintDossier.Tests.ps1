@@ -127,6 +127,7 @@ Describe 'Similar complaints' {
         @($similar.SameProductGroupCategory | ForEach-Object CaseId) -join ',' | Should -Be 'A-2,A-3'
         $similar.RecentCount | Should -Be 1
         $similar.LookbackFrom | Should -Be '2025-06-02'
+        $similar.FrequencyLevel | Should -Be 'occasional'
     }
     It 'gives the sample data the expected facts' {
         $config = Import-DossierConfig -Path $script:ExampleConfig -Root $script:Root
@@ -144,14 +145,17 @@ Describe 'Per-case prompt' {
         $script:Cases = @(Import-DossierCases -Config $script:Config)
         function Get-Prompt([string]$Id, [string]$Type) {
             $case = $script:Cases | Where-Object CaseId -eq $Id
-            New-CasePrompt -Template (Read-Utf8File $script:Config.Paths.Prompts.$Type) -Case $case -Similar (Get-SimilarComplaints -Case $case -Cases $script:Cases) `
-                -Documents @(Get-CaseDocuments -Config $script:Config -CaseId $Id) -RequiredStatements @(Get-RequiredStatements -Config $script:Config -Case $case -Type $Type)
+            $similar = Get-SimilarComplaints -Case $case -Cases $script:Cases
+            New-CasePrompt -Template (Read-Utf8File $script:Config.Paths.Prompts.$Type) -Case $case -Similar $similar `
+                -Documents @(Get-CaseDocuments -Config $script:Config -CaseId $Id) -RequiredStatements @(Get-RequiredStatements -Config $script:Config -Case $case -Type $Type -Similar $similar) `
+                -ProcessFacts @($script:Config.Settings.Reports.$Type.ProcessFacts)
         }
     }
     It 'holds only this case, its similar complaints and its own documents' {
         $prompt = Get-Prompt 'SYN-2026-010' 'Long'
         $prompt | Should -Not -Match '\{\{[A-Z_]+\}\}'
-        $prompt | Should -Match 'long complaint report for one product complaint, case SYN-2026-010'
+        $prompt | Should -Match 'Write the complete complaint report for case SYN-2026-010 straight away'
+        $prompt | Should -Match '(?m)^- Retained samples did not need to be checked\.$'
         $prompt | Should -Match '\| Batch \| SYN-LOT-26A019 \|'
         $prompt | Should -Match '--- Document sample-check\.txt ---'
         $prompt | Should -Match '\| SYN-2026-009 \| 2026-05-20 \| Label or print \|'
@@ -165,9 +169,13 @@ Describe 'Per-case prompt' {
         $prompt | Should -Match '\[phone removed\]'
     }
     It 'demands the no-sample sentence in a long report when no sample was received' {
-        Get-Prompt 'SYN-2026-007' 'Long' | Should -Match '- No returned sample was available for examination\.'
-        Get-Prompt 'SYN-2026-010' 'Long' | Should -Match 'word for word:\nNone for this case\.'
-        Get-Prompt 'SYN-2026-006' 'Short' | Should -Match 'word for word:\nNone for this case\.'
+        Get-Prompt 'SYN-2026-007' 'Long' | Should -Match '(?m)^- No complaint sample was available for the investigation\.$'
+        Get-Prompt 'SYN-2026-010' 'Long' | Should -Match 'section 4\):\nNone for this case\.'
+    }
+    It 'demands the frequency sentence with the level the tool computed in a short report' {
+        Get-Prompt 'SYN-2026-006' 'Short' | Should -Match '(?m)^- The reported defect is classified as occasional\.$'
+        Get-Prompt 'SYN-2026-005' 'Short' | Should -Match '(?m)^- The reported defect is classified as rare\.$'
+        Get-Prompt 'SYN-2026-006' 'Short' | Should -Match '(?m)^- The batch record was reviewed and showed no findings\.$'
     }
     It 'leaves the upload-only CSV out of the prompt text' {
         Get-Prompt 'SYN-2026-006' 'Short' | Should -Not -Match 'shipment-log|SHP-0408'
@@ -210,6 +218,24 @@ Describe 'Response checks' {
         ($checks | Where-Object Name -eq 'Response is not a copy of the prompt').Passed | Should -BeFalse
         $checks = Test-ReportResponse -Response "## Complaint [SYN-1]`n### Case documents`nNo case documents." -Prompt 'other' -CaseId 'SYN-1' -RequiredSections @() -KnownCaseIds $script:Known
         ($checks | Where-Object Name -eq 'Response is not a copy of the prompt').Detail | Should -Match 'contains prompt heading: ### Case documents'
+    }
+    It 'turns plain-text section names, as the Copilot copy button returns them, into headings' {
+        $plain = "Complaint`r`n`r`nCase [SYN-1] was received.`r`n`r`nConclusion:`r`nOpen.`r`nComplaint text that is not a heading."
+        $text = ConvertTo-SectionHeadings $plain $script:Sections
+        $text | Should -Match '(?m)^## Complaint$'
+        $text | Should -Match '(?m)^## Conclusion$'
+        $text | Should -Match '(?m)^Complaint text that is not a heading\.$'
+        $checks = Test-ReportResponse -Response $text -Prompt 'p' -CaseId 'SYN-1' -RequiredSections $script:Sections -KnownCaseIds $script:Known
+        @($checks | Where-Object { -not $_.Passed }).Count | Should -Be 0
+    }
+    It 'fails when the answer does not end with a classification' {
+        $classes = @('The complaint is classified as justified.', 'The complaint is classified as not justified.')
+        $ok = Test-ReportResponse -Response "## Complaint [SYN-1]`nThe complaint is classified as not justified.`n" -Prompt 'p' -CaseId 'SYN-1' -RequiredSections @() -KnownCaseIds $script:Known -ClassificationStatements $classes
+        ($ok | Where-Object Name -eq 'Conclusion ends with a classification').Passed | Should -BeTrue
+        $bad = Test-ReportResponse -Response "## Complaint [SYN-1]`nThe complaint is classified as justified. More text." -Prompt 'p' -CaseId 'SYN-1' -RequiredSections @() -KnownCaseIds $script:Known -ClassificationStatements $classes
+        ($bad | Where-Object Name -eq 'Conclusion ends with a classification').Passed | Should -BeFalse
+        $none = Test-ReportResponse -Response '## Complaint [SYN-1]' -Prompt 'p' -CaseId 'SYN-1' -RequiredSections @() -KnownCaseIds $script:Known
+        @($none | Where-Object Name -eq 'Conclusion ends with a classification').Count | Should -Be 0
     }
     It 'fails when a required statement is missing' {
         $checks = Test-ReportResponse -Response '## Complaint [SYN-1]' -Prompt 'p' -CaseId 'SYN-1' -RequiredSections @() -KnownCaseIds $script:Known -RequiredStatements @('No returned sample was available for examination.')
@@ -265,7 +291,8 @@ Describe 'Demo run: one DRAFT report per open case' {
             Should -Be 'samples/case-folders/SYN-2026-007/intake-note.txt,samples/case-folders/SYN-2026-007/lab-request.txt'
         ($script:Audit007.inputs | Where-Object role -eq 'demo-response').path | Should -Be 'samples/demo-responses/SYN-2026-007.md'
         @($script:Audit007.checks | Where-Object { -not $_.passed }).Count | Should -Be 0
-        ($script:Audit007.checks | Where-Object name -eq 'Required statements present').detail | Should -Match 'present: No returned sample'
+        ($script:Audit007.checks | Where-Object name -eq 'Required statements present').detail | Should -Match 'present: No complaint sample was available for the investigation\.'
+        ($script:Audit007.checks | Where-Object name -eq 'Conclusion ends with a classification').passed | Should -BeTrue
     }
     It 'logs input paths relative to the project, without user folders' {
         foreach ($item in $script:Audit007.inputs | Where-Object role -ne 'config') { $item.path | Should -Not -Match '^(/|[A-Za-z]:)' }
@@ -354,7 +381,8 @@ Describe 'Approval when automated checks failed' {
         # Demo run whose answer for SYN-2026-007 cites a case ID that is not in the complaint list.
         $answers = Join-Path $TestDrive 'answers-bad'
         Copy-Item -Recurse (Join-Path $script:Root 'samples/demo-responses') $answers
-        Add-Content -LiteralPath (Join-Path $answers 'SYN-2026-007.md') -Value "`n- Compare with the earlier case [SYN-2026-099]."
+        $file = Join-Path $answers 'SYN-2026-007.md'
+        Write-Utf8File $file ((Read-Utf8File $file).Replace('In case [SYN-2026-007] a dark fibre', 'In case [SYN-2026-007] (compare [SYN-2026-099]) a dark fibre'))
         $config = New-TestConfig { param($c) $c.Demo.ResponsePath = $answers }
         $script:FailedRun = Join-Path $TestDrive 'failed-run'
         Invoke-Demo $config $script:FailedRun @('SYN-2026-007', 'SYN-2026-006') | Out-Null

@@ -170,7 +170,7 @@ function Import-DossierConfig {
         foreach ($key in 'Marker', 'PromptPath', 'Title') {
             if ([string]::IsNullOrWhiteSpace([string](Get-ConfigValue $settings $key))) { throw "Configuration value missing: Reports.$type.$key" }
         }
-        if (@(Get-ConfigValue $settings 'RequiredSections').Count -eq 0) { throw "Configuration value missing: Reports.$type.RequiredSections" }
+        if (@(@(Get-ConfigValue $settings 'RequiredSections') | Where-Object { $_ }).Count -eq 0) { throw "Configuration value missing: Reports.$type.RequiredSections" }
         $prompts[$type] = Resolve-DossierPath $Root $settings.PromptPath
     }
     if ($config.Reports.Short.Marker -eq $config.Reports.Long.Marker) { throw 'Reports.Short.Marker and Reports.Long.Marker must differ.' }
@@ -396,7 +396,7 @@ function Select-DossierCases {
         if ($unknown.Count) { throw "Case ID not found in the complaint list: $($unknown -join ', ')" }
         $chosen = @($Cases | Where-Object { $CaseId -contains $_.CaseId })
     } else {
-        $open = @(Get-ConfigValue (Get-ConfigValue $Config.Settings 'Selection') 'OpenStatuses')
+        $open = @(@(Get-ConfigValue (Get-ConfigValue $Config.Settings 'Selection') 'OpenStatuses') | Where-Object { $_ })
         if ($open.Count -eq 0) { $open = @('Open') }
         $chosen = @($Cases | Where-Object { $open -contains $_.Status })
     }
@@ -430,7 +430,13 @@ function Get-SimilarComplaints {
         [Parameter(Mandatory)]$Case,
         [Parameter(Mandatory)][object[]]$Cases,
         [int]$LookbackMonths = 12,
-        [int]$RecentDays = 30
+        [int]$RecentDays = 30,
+        # Ascending thresholds: the level of the highest MinCases that the count reaches.
+        [object[]]$FrequencyLevels = @(
+            [pscustomobject]@{ MinCases = 0; Level = 'rare' },
+            [pscustomobject]@{ MinCases = 1; Level = 'occasional' },
+            [pscustomobject]@{ MinCases = 3; Level = 'frequent' },
+            [pscustomobject]@{ MinCases = 6; Level = 'very frequent' })
     )
     $others = @($Cases | Where-Object { $_.CaseId -ne $Case.CaseId })
     $batch = ([string](Get-ConfigValue $Case 'Batch')).Trim()
@@ -444,6 +450,9 @@ function Get-SimilarComplaints {
             $_.ReceivedDate -gt $from -and $_.ReceivedDate -le $Case.ReceivedDate
         })
     $recent = @($sameKind | Where-Object { $_.ReceivedDate -ge $recentFrom })
+    $level = ''
+    foreach ($step in @($FrequencyLevels | Sort-Object { [int]$_.MinCases })) { if ($sameKind.Count -ge [int]$step.MinCases) { $level = [string]$step.Level } }
+    if (-not $level) { throw 'SimilarComplaints.FrequencyLevels must start at MinCases 0.' }
     $summary = { param($c) [pscustomobject][ordered]@{ CaseId = $c.CaseId; ReceivedDate = $c.ReceivedDate.ToString('yyyy-MM-dd'); Category = $c.Category; ProductGroup = (Get-ConfigValue $c 'ProductGroup'); Batch = (Get-ConfigValue $c 'Batch'); Status = $c.Status } }
     [pscustomobject][ordered]@{
         ListSize                 = $Cases.Count
@@ -455,6 +464,7 @@ function Get-SimilarComplaints {
         SameProductGroupCategory = @($sameKind | ForEach-Object { & $summary $_ })
         RecentDays               = $RecentDays
         RecentCount              = $recent.Count
+        FrequencyLevel           = $level
     }
 }
 
@@ -478,6 +488,7 @@ function Get-SimilarComplaintSentences {
     if ($n -gt 0 -and $Similar.RecentCount -eq 0) { $recent = "; none of them in the last $($Similar.RecentDays) days" }
     elseif ($n -gt 0) { $recent = "; $($Similar.RecentCount) of them in the last $($Similar.RecentDays) days" }
     $lines += "Same product group and category ($group, $($Case.Category)): $(& $count $n) received from $($Similar.LookbackFrom) to $($Similar.LookbackTo), the $($Similar.LookbackMonths) months up to this case$recent."
+    $lines += "Frequency level: $($Similar.FrequencyLevel) (from the number of other cases with the same product group and category in these $($Similar.LookbackMonths) months)."
     $lines += "The complaint list holds $($Similar.ListSize) cases in total."
     $lines
 }
@@ -502,7 +513,7 @@ function Get-CaseDocuments {
     $folder = Get-CaseFolder $Config $CaseId
     if (-not (Test-Path -LiteralPath $folder -PathType Container)) { return @() }
     $settings = $Config.Settings.CaseFolders
-    $extensions = @(@(Get-ConfigValue $settings 'TextExtensions') | ForEach-Object { ([string]$_).ToLowerInvariant() })
+    $extensions = @(@(Get-ConfigValue $settings 'TextExtensions') | Where-Object { $_ } | ForEach-Object { ([string]$_).ToLowerInvariant() })
     $markers = Get-MarkerNames $Config
     $max = 4000
     if ($null -ne (Get-ConfigValue $settings 'MaxCharsPerDocument')) { $max = [int]$settings.MaxCharsPerDocument }
@@ -556,13 +567,19 @@ function Format-MarkdownTable {
 
 function Get-RequiredStatements {
     <#
-      Sentences the answer must contain word for word. The long report must say
-      that no returned sample was examined when the complaint list says none was received.
+      Sentences the answer must contain word for word:
+      - Reports.<type>.FrequencyStatement with {LEVEL} replaced by the frequency
+        level the tool computed (the short report opens its section 2 with it)
+      - Reports.<type>.NoSampleStatement when the complaint list says that no
+        returned sample was received
     #>
-    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$Case, [Parameter(Mandatory)][string]$Type)
-    $statement = [string](Get-ConfigValue $Config.Settings.Reports.$Type 'NoSampleStatement')
+    param([Parameter(Mandatory)]$Config, [Parameter(Mandatory)]$Case, [Parameter(Mandatory)][string]$Type, $Similar)
+    $settings = $Config.Settings.Reports.$Type
+    $frequency = [string](Get-ConfigValue $settings 'FrequencyStatement')
+    if ($frequency -and $null -ne $Similar) { $frequency.Replace('{LEVEL}', [string]$Similar.FrequencyLevel) }
+    $statement = [string](Get-ConfigValue $settings 'NoSampleStatement')
     $received = ([string](Get-ConfigValue $Case 'SampleReceived')).Trim()
-    if ($statement -and $received -match '^(?i)(no|n|false|0)$') { return $statement }
+    if ($statement -and $received -match '^(?i)(no|n|false|0)$') { $statement }
 }
 
 function Get-CaseRecordRows {
@@ -591,6 +608,7 @@ function New-CasePrompt {
         [object[]]$Documents = @(),
         [string[]]$Attachments = @(),
         [string[]]$RequiredStatements = @(),
+        [string[]]$ProcessFacts = @(),
         [bool]$Mask = $true
     )
     $clean = { param($t) if ($Mask) { Protect-PromptText $t } else { $t } }
@@ -614,10 +632,13 @@ function New-CasePrompt {
     if (@($Attachments).Count) { $attachText = (@($Attachments | ForEach-Object { "- $_" }) -join "`n") }
     $statementText = 'None for this case.'
     if (@($RequiredStatements).Count) { $statementText = (@($RequiredStatements | ForEach-Object { "- $_" }) -join "`n") }
+    $factText = 'None.'
+    if (@($ProcessFacts).Count) { $factText = (@($ProcessFacts | ForEach-Object { "- $_" }) -join "`n") }
 
     $values = @{
         '{{CASE_ID}}'             = $Case.CaseId
         '{{REQUIRED_STATEMENTS}}' = $statementText
+        '{{PROCESS_FACTS}}'       = $factText
         '{{CASE}}'                = $record
         '{{SIMILAR}}'             = $similarText
         '{{DOCUMENTS}}'           = $docText
@@ -632,6 +653,21 @@ function New-CasePrompt {
 
 # ---------------------------------------------------------------- response checks
 
+function ConvertTo-SectionHeadings {
+    <#
+      The copy button of the Copilot app copies the rendered answer as plain
+      text, without Markdown marks. A line that holds only a section name
+      (optionally followed by a colon) is turned back into a "## " heading.
+      response.md keeps the answer as copied; checks and report use this form.
+    #>
+    param([AllowEmptyString()][string]$Response, [string[]]$Sections)
+    $lines = foreach ($line in ($Response -split "`r?`n")) {
+        $name = $line.Trim().TrimEnd(':').Trim()
+        if ($name -and $line.Trim() -notmatch '^#' -and $Sections -contains $name) { "## $name" } else { $line }
+    }
+    $lines -join "`n"
+}
+
 function Test-ReportResponse {
     <#
       Automated checks on the AI answer for one case. They do not replace the
@@ -643,7 +679,9 @@ function Test-ReportResponse {
         [string]$CaseId,
         [string[]]$RequiredSections,
         [string[]]$KnownCaseIds,
-        [string[]]$RequiredStatements = @()
+        [string[]]$RequiredStatements = @(),
+        # When set, the answer must end with one of these sentences.
+        [string[]]$ClassificationStatements = @()
     )
     $checks = New-Object System.Collections.Generic.List[object]
     $checks.Add([pscustomobject]@{ Name = 'Response is not empty'; Passed = -not [string]::IsNullOrWhiteSpace($Response); Detail = "$($Response.Length) characters" })
@@ -676,6 +714,14 @@ function Test-ReportResponse {
     if (@($RequiredStatements).Count) { $detail = 'present: ' + ($RequiredStatements -join ' ') }
     if ($absent.Count) { $detail = 'missing: ' + ($absent -join ' ') }
     $checks.Add([pscustomobject]@{ Name = 'Required statements present'; Passed = ($absent.Count -eq 0); Detail = $detail })
+
+    if (@($ClassificationStatements).Count) {
+        $end = $Response.TrimEnd()
+        $match = @($ClassificationStatements | Where-Object { $end.EndsWith($_, [StringComparison]::OrdinalIgnoreCase) })
+        $detail = 'ends with: ' + ($match -join '')
+        if (-not $match.Count) { $detail = 'last sentence is none of: ' + ($ClassificationStatements -join ' / ') }
+        $checks.Add([pscustomobject]@{ Name = 'Conclusion ends with a classification'; Passed = ($match.Count -gt 0); Detail = $detail })
+    }
     $checks.ToArray()
 }
 
@@ -746,7 +792,7 @@ function ConvertFrom-MarkdownToWordXml {
             $style = 'Heading3'
             if ($Matches[1].Length -ge 3) { $style = 'Heading4' }
             [void]$out.Append((New-WParagraph $Matches[2] -Style $style))
-        } elseif ($trim -match '^[-*]\s+(.+)$') {
+        } elseif ($trim -match ('^[-*' + [char]0x2022 + ']\s+(.+)$')) {
             & $flush
             [void]$out.Append((New-WParagraph ([string][char]0x2022 + ' ' + $Matches[1]) -Indent 360))
         } elseif ($trim -match '^(\d+)[.)]\s+(.+)$') {
@@ -1031,7 +1077,9 @@ function New-DossierCaseReport {
     $similarSettings = Get-ConfigValue $Config.Settings 'SimilarComplaints'
     if ($null -ne (Get-ConfigValue $similarSettings 'LookbackMonths')) { $lookback = [int]$similarSettings.LookbackMonths }
     if ($null -ne (Get-ConfigValue $similarSettings 'RecentDays')) { $recentDays = [int]$similarSettings.RecentDays }
-    $similar = Get-SimilarComplaints -Case $case -Cases $AllCases -LookbackMonths $lookback -RecentDays $recentDays
+    $levelArgs = @{}
+    if (@(@(Get-ConfigValue $similarSettings 'FrequencyLevels') | Where-Object { $_ }).Count) { $levelArgs.FrequencyLevels = @($similarSettings.FrequencyLevels) }
+    $similar = Get-SimilarComplaints -Case $case -Cases $AllCases -LookbackMonths $lookback -RecentDays $recentDays @levelArgs
     $documents = @(Get-CaseDocuments -Config $Config -CaseId $case.CaseId)
     foreach ($doc in $documents) { & $addInput 'case-document' $doc.Path }
     $uploads = @()
@@ -1039,7 +1087,8 @@ function New-DossierCaseReport {
         $uploads = @(Get-UploadFiles -Config $Config -CaseId $case.CaseId)
         foreach ($file in $uploads) { & $addInput 'upload' $file.FullName }
     }
-    $statements = @(Get-RequiredStatements -Config $Config -Case $case -Type $type)
+    $statements = @(Get-RequiredStatements -Config $Config -Case $case -Type $type -Similar $similar)
+    $facts = @(@(Get-ConfigValue $settings 'ProcessFacts') | Where-Object { $_ })
     $caseDataFile = Join-Path $casePath 'case-data.json'
     $caseData = [pscustomobject][ordered]@{
         caseId             = $case.CaseId
@@ -1051,6 +1100,7 @@ function New-DossierCaseReport {
         }
         similarComplaints  = $similar
         requiredStatements = $statements
+        processFacts       = $facts
         documents          = @($documents | ForEach-Object { $_.Name })
         uploads            = @($uploads | ForEach-Object { $_.Name })
     }
@@ -1061,7 +1111,7 @@ function New-DossierCaseReport {
     $mask = $true
     if ($null -ne (Get-ConfigValue (Get-ConfigValue $Config.Settings 'Prompt') 'MaskContactData')) { $mask = [bool]$Config.Settings.Prompt.MaskContactData }
     $prompt = New-CasePrompt -Template (Read-Utf8File $Config.Paths.Prompts.$type) -Case $case -Similar $similar -Documents $documents `
-        -Attachments @($uploads | ForEach-Object { $_.Name }) -RequiredStatements $statements -Mask $mask
+        -Attachments @($uploads | ForEach-Object { $_.Name }) -RequiredStatements $statements -ProcessFacts $facts -Mask $mask
     $promptFile = Join-Path $casePath 'prompt.txt'
     Write-Utf8File $promptFile $prompt
     & $addEvent 'prompt-built' "$($prompt.Length) characters, $($documents.Count) document(s), $($uploads.Count) upload(s)"
@@ -1088,11 +1138,13 @@ function New-DossierCaseReport {
         $copilotStatus = Invoke-CopilotHandoff -Config $Config -PromptFile $promptFile -ResponseFile $responseFile -UploadFiles $uploads -RunPath $casePath
         & $addEvent 'response-received' "copilot, model=$modelText, uploads=$($uploads.Count)"
     }
-    $response = Read-Utf8File $responseFile
+    # Plain-text answers (Copilot copy button) get their section headings back.
+    $response = ConvertTo-SectionHeadings (Read-Utf8File $responseFile) @($settings.RequiredSections)
 
     # 4. Checks and report
     $checks = @(Test-ReportResponse -Response $response -Prompt $prompt -CaseId $case.CaseId -RequiredSections @($settings.RequiredSections) `
-            -KnownCaseIds @($AllCases | ForEach-Object { $_.CaseId }) -RequiredStatements $statements)
+            -KnownCaseIds @($AllCases | ForEach-Object { $_.CaseId }) -RequiredStatements $statements `
+            -ClassificationStatements @(@(Get-ConfigValue $settings 'ClassificationStatements') | Where-Object { $_ }))
     $reportName = Get-ReportFileName $case.CaseId $type
     $reportFile = Join-Path $casePath $reportName
     $run = [pscustomobject]@{

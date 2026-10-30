@@ -16,16 +16,39 @@
     }
   },
   "Selection": {
-    "OpenStatuses": ["Open"]
+    "OpenStatuses": [
+      "Open"
+    ]
   },
   "CaseFolders": {
     "Path": "samples/case-folders",
-    "TextExtensions": [".txt", ".md"],
+    "TextExtensions": [
+      ".txt",
+      ".md"
+    ],
     "MaxCharsPerDocument": 4000
   },
   "SimilarComplaints": {
     "LookbackMonths": 12,
-    "RecentDays": 30
+    "RecentDays": 30,
+    "FrequencyLevels": [
+      {
+        "MinCases": 0,
+        "Level": "rare"
+      },
+      {
+        "MinCases": 1,
+        "Level": "occasional"
+      },
+      {
+        "MinCases": 3,
+        "Level": "frequent"
+      },
+      {
+        "MinCases": 6,
+        "Level": "very frequent"
+      }
+    ]
   },
   "Prompt": {
     "MaskContactData": true
@@ -35,14 +58,43 @@
       "Marker": "short.txt",
       "Title": "Complaint report (short)",
       "PromptPath": "prompts/short-report.txt",
-      "RequiredSections": ["Complaint", "Similar complaints", "Assessment", "Conclusion"]
+      "RequiredSections": [
+        "Basic complaint data",
+        "1. Technical description and categorisation of the defect",
+        "2. Statistical and historical classification",
+        "3. Assessment of the available information",
+        "4. Conclusion"
+      ],
+      "FrequencyStatement": "The reported defect is classified as {LEVEL}.",
+      "ProcessFacts": [
+        "The batch record was reviewed and showed no findings."
+      ]
     },
     "Long": {
       "Marker": "long.txt",
       "Title": "Complaint report (long)",
       "PromptPath": "prompts/long-report.txt",
-      "RequiredSections": ["Complaint", "Previous complaints", "Returned sample", "Investigation so far", "Assessment", "Proposed actions", "Conclusion"],
-      "NoSampleStatement": "No returned sample was available for examination."
+      "RequiredSections": [
+        "Basic complaint data",
+        "1. Technical description and categorisation of the defect",
+        "2. Previous complaints for the same batch",
+        "3. Previous complaints for the same product",
+        "4. Examination of the returned complaint sample",
+        "5. Result of the batch record review",
+        "6. Result of the review of analyses and retained samples",
+        "7. Assessment of a possible manufacturing defect",
+        "8. Status of existing or initiated corrective actions",
+        "9. Risk assessment and overall conclusion"
+      ],
+      "NoSampleStatement": "No complaint sample was available for the investigation.",
+      "ProcessFacts": [
+        "The batch record was reviewed and showed no findings.",
+        "Retained samples did not need to be checked."
+      ],
+      "ClassificationStatements": [
+        "The complaint is classified as justified.",
+        "The complaint is classified as not justified."
+      ]
     }
   },
   "Report": {
@@ -59,7 +111,14 @@
     "TemporaryChat": true,
     "Upload": {
       "Path": "",
-      "Extensions": [".pdf", ".docx", ".xlsx", ".csv", ".png", ".jpg"],
+      "Extensions": [
+        ".pdf",
+        ".docx",
+        ".xlsx",
+        ".csv",
+        ".png",
+        ".jpg"
+      ],
       "MaxFiles": 3,
       "MaxFileSizeMB": 10
     },

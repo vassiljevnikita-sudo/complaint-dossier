@@ -1,33 +1,107 @@
-You are drafting the long complaint report for one product complaint, case {{CASE_ID}}.
-Your answer is a draft. A trained reviewer checks every statement against the case file before the report is used.
+LONG COMPLAINT REPORT - automatic draft
 
-Rules:
-- Use only the data in this message and in the attached files. Do not invent test results, causes, dates, batches or other cases.
-- Use the similar-complaint counts exactly as given. They were calculated by the tool. Do not recalculate them.
-- Cite case IDs in square brackets, for example [{{CASE_ID}}]. Cite this case at least once. Write batch numbers without brackets.
-- If information is missing, say so in the section where it is missing instead of guessing. Describe a pending test as pending, never with a result.
-- The assessment and the conclusion are proposals for the reviewer, not decisions.
-- Leave out names, e-mail addresses, phone numbers and postal addresses.
-- Write in English, in plain sentences.
+Write the complete complaint report for case {{CASE_ID}} straight away. Use only the case data below, the classification of similar complaints calculated by the tool, and the content of the case documents. The original case files are also attached to this chat; treat them together with the document content below as the binding case documentation. There are no follow-up questions, additional queries, approval steps or export gates. Output only the finished report.
 
-Sentences that must appear word for word:
+DATA CHECK
+Compare the structured case data, the complaint description and the case documents with each other. Do not invent any information, investigations, findings, causes, actions or assessments. Name relevant contradictions neutrally. Treat missing evidence explicitly as not available or not assessable.
+
+Binding additional information for every long report, regardless of other case data:
+{{PROCESS_FACTS}}
+Treat this information as given facts in the report and never present it as missing, open or not assessable.
+
+For medical devices, give an IMDRF code if one is provided; if none is provided, write nothing about it. For a medical device complaint classified as not justified, refer to it as an incident where appropriate. Never use the phrase "further closed complaints".
+
+STATISTICS AND HISTORY
+The tool calculates the statistics. Use the frequency level given below unchanged. Do not recalculate it and do not state internal numbers or calculation methods unless they are given explicitly as report information.
+
+For statements about history, use only the similar complaints given below. Never assess open cases as historically concluded. Several reports alone do not prove a trend, a recurring defect or a manufacturing defect. If no relevant, assessable earlier cases are given, state factually that the case is an isolated case based on the available history.
+
+DATA BASIS
+Analysis and assessment may use only the information provided, in particular:
+• structured case data for the case ID
+• the classification of similar complaints calculated by the tool
+• case documents and their extracted content
+• original case files attached to this chat
+• earlier complaints and investigation results given below
+• the binding additional information of this prompt on the batch record and retained samples
+
+Do not mention in the report that information came from a spreadsheet, a file system, a document management system, this prompt, a script or other internal systems. Describe sources only in professional terms where they matter for the complaint, for example a returned sample, a partner report or an investigation report.
+
+PRODUCT CATEGORY
+Determine the product category from the data provided and use it consistently in the report:
+• medicinal product
+• medical device
+• food supplement
+• cosmetic
+• product, as a fallback
+
+Do not output internal category codes.
+
+BINDING TECHNICAL OUTPUT RULES
+Plain report text in English, no Markdown code block. Do not copy direct contact data such as names, e-mail addresses, phone numbers or postal addresses into the report. Refer to the source of the complaint as "consumer". Cite case IDs in square brackets, for example [{{CASE_ID}}].
+
+Sentences that must appear word for word (a sentence about the complaint sample belongs in section 4):
 {{REQUIRED_STATEMENTS}}
 
-Answer in Markdown with exactly these seven sections, in this order:
-## Complaint
-What was reported, when, for which product group and batch, and how severe the case is rated.
-## Previous complaints
-Other complaints for the same batch, and for the same product group and category, as given below.
-## Returned sample
-Whether a returned sample was received and what its examination showed, from the case documents.
-## Investigation so far
-What the case documents show has been checked or requested, and what is still open.
-## Assessment
-Whether the information points to a defect from manufacturing or packaging, to transport or handling, or does not allow a conclusion yet, with the reasons.
-## Proposed actions
-Bullet list of concrete next steps for the reviewer, for example tests, record reviews or a reply to the reporter.
-## Conclusion
-Two to four sentences: the proposed classification of the complaint and what has to happen before the case can be closed.
+REPORT STRUCTURE
+
+Basic complaint data
+As a list, as far as available:
+• case ID
+• external reference or N/A
+• product group
+• batch
+• defect / complaint category
+• complaint description in two to three sentences
+• severity
+• source
+• transport, storage and use
+
+1. Technical description and categorisation of the defect
+Describe the defect, the affected component and the defect category factually. Do not anticipate a cause. For medical devices, give an IMDRF code if one is provided; if none is provided, write nothing about it.
+
+2. Previous complaints for the same batch
+Place only the relevant and historically assessable complaints for the same batch given below in context. Do not assess open cases historically. If no assessable complaints for the same batch are given, say so neutrally. Do not disclose internal counting or calculation methods.
+
+3. Previous complaints for the same product
+Place only the relevant and historically assessable complaints for the same product given below in context. Describe the historical assessment qualitatively and according to the status of each case. Do not interpret a mere number of reports as a trend or a manufacturing defect. Do not assess open cases as historically concluded.
+
+4. Examination of the returned complaint sample
+Assess as a complaint sample only a sample that was actually returned and examined. A product that was only shown, photographed or announced is not a returned sample. If there is no sample or no documented sample finding, say so neutrally and do not invent an examination.
+
+5. Result of the batch record review
+State as binding that the batch record was reviewed and showed no findings. This applies to every long report and is not to be treated as missing evidence. Add further batch-related findings only if they are documented explicitly in the case data or documents.
+
+6. Result of the review of analyses and retained samples
+State as binding that a check of retained samples was not required. Analysis or other test results that actually exist may be assessed in addition. Do not add undocumented analyses or findings and do not claim a retained sample check.
+
+7. Assessment of a possible manufacturing defect
+Assess only on the basis of the available case data, sample findings, batch record, analysis results and relevant history. Do not replace missing evidence with assumptions. Several reports alone do not prove a manufacturing defect.
+
+8. Status of existing or initiated corrective actions
+Name only corrective, preventive or other actions that are actually documented. If no actions are documented, say so neutrally. Do not invent a CAPA or an action and do not derive one automatically from a complaint.
+
+9. Risk assessment and overall conclusion
+Summarise the defect, the available investigation results, the historical classification, the link to manufacturing and any actions in a factual overall assessment. The conclusion must end clearly with the classification that fits the available data: "The complaint is classified as justified." or "The complaint is classified as not justified."
+
+If the data is incomplete, do not invent a positive finding on cause or manufacturing. A complete reference report may only be used for an identical defect and a unique reference number; its final assessment is to be taken over unchanged.
+
+STYLE AND OUTPUT FORMAT
+Output only the complete report. No follow-up questions, notes, preliminary remarks, requests for approval, meta comments or text outside the report.
+
+Use exactly this order and these headings, each on its own line:
+Basic complaint data
+1. Technical description and categorisation of the defect
+2. Previous complaints for the same batch
+3. Previous complaints for the same product
+4. Examination of the returned complaint sample
+5. Result of the batch record review
+6. Result of the review of analyses and retained samples
+7. Assessment of a possible manufacturing defect
+8. Status of existing or initiated corrective actions
+9. Risk assessment and overall conclusion
+
+Each line of the basic data starts with "• ". Sections 1 to 9 contain only factual running text, no tables and no lists. Language: English. Do not mention the prompt, the script, spreadsheets, document management systems, file paths, internal analysis steps or technical processing steps.
 
 ### Complaint record (from the complaint list)
 {{CASE}}
