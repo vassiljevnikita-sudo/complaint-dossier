@@ -4,7 +4,7 @@ Complaint Dossier is a prototype. It is designed along GAMP 5 principles, but it
 
 ## Intended use
 
-The tool prepares a draft for a periodic complaint trend review, for example as input to a product quality review. A qualified person reads the draft, checks it against the case records and decides what goes into the official record. The tool does not classify complaints, does not decide on root causes or CAPAs and does not write into any GxP system.
+The tool prepares a draft for a periodic complaint trend review, for example as input to a product quality review. A trained QA reviewer reads the draft, checks it against the case records and decides what goes into the official record. The tool does not classify complaints, does not decide on root causes or CAPAs and does not write into any GxP system.
 
 Under this intended use the tool has an indirect GxP impact. Its output influences a quality decision, but a person makes that decision and signs it.
 
@@ -13,18 +13,18 @@ Under this intended use the tool has an indirect GxP impact. Its output influenc
 | Component | Category | Reasoning |
 | --- | --- | --- |
 | Complaint Dossier scripts (PowerShell) | 5, custom application | Written for this workflow. The statistics, prompt assembly, report generation and audit log are custom code, so they need full lifecycle documentation and testing. |
-| Microsoft 365 Copilot (desktop app and service) | Treated as a supplier-provided cloud service; the language model is a non-deterministic component | The company configures it at tenant level but cannot test the model itself. The same prompt can give different answers. GAMP 5 Second Edition (Appendix D11) asks for controls around such AI components instead of validating them like deterministic code. |
+| Microsoft 365 Copilot (desktop app and service) | Treated as a supplier-provided cloud service; the language model is a non-deterministic component | The company configures it at tenant level but cannot test the model itself. The same prompt can give different answers. ISPE GAMP 5 Second Edition (2022), Appendix D11 "Artificial Intelligence and Machine Learning", describes a risk-based approach for such components. Here that means controls around the model's output: a fixed prompt, automated checks and a human review. |
 | Excel workbook as case database | 3 for Excel itself, the workbook is data | The tool reads the .xlsx file directly without Excel. The workbook structure is fixed by the configuration (sheet, header row, column mapping). |
 | Word report template | Data, under document control | The template only carries layout and two anchors. Content comes from the tool. |
 | Windows, PowerShell | 1, infrastructure | Qualified as part of the workstation, not of this tool. |
 
 ## Risk view
 
-The risks below are the ones I considered when designing the tool. A real assessment would use the company's risk method (for example an FMEA) and its own severity scale.
+The risks below are the ones considered in the design. A real assessment would use the company's risk method (for example an FMEA) and its own severity scale.
 
 | Risk | Effect | Control in the tool | Remaining gap |
 | --- | --- | --- | --- |
-| Wrong statistics | Trend under- or overstated | Counts are computed by the tool, not by the model. Pester tests check counts, shares and empty months. The prompt tells the model not to recalculate. | Column mapping errors in a real workbook are only caught if a required column is missing. |
+| Wrong statistics | Trend under- or overstated | Counts by category, product group and month, and the list of batches with more than one case, are computed by the tool, not by the model. Pester tests check counts, shares and empty months. The prompt tells the model not to recalculate. | Column mapping errors in a real workbook are only caught if a required column is missing. |
 | Model invents cases, numbers or causes | Reviewer reads false statements | The prompt forbids it. An automated check flags cited case IDs that are not in the input. While that check or any other automated check has failed, approval is refused unless the reviewer gives a written justification; the signed report and audit.json then record a documented exception. The report labels the section as AI-drafted. The reviewer must check every statement. | Invented facts without a case ID are not detected automatically. Only the human review catches them. The check results that approval reads sit in audit.json, which is a plain file (see below). |
 | Model answer incomplete | Missing sections in the review | Check for the five required sections; result shown in the report and in audit.json. A missing section blocks approval in the same way as an unknown case ID. | A section can exist and still be empty or shallow. |
 | Prompt lands in an old chat or with the wrong model | Context from other conversations, unknown model behaviour | Live mode always opens a new chat. The model comes from the configuration. If the Copilot menu does not offer it, the run stops. It never falls back to another model. | The model name in the menu says nothing about the model version behind it. Microsoft can change it without notice. |

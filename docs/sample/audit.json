@@ -4,12 +4,12 @@
     "name": "Complaint Dossier",
     "version": "0.2.0"
   },
-  "runId": "20261030T023604Z-7f1975",
+  "runId": "20261030T032002Z-f707e0",
   "mode": "demo",
   "status": "DRAFT",
   "operator": {
-    "osAccount": "runneradmin",
-    "host": "PowerShell 7.6.7 (Core)"
+    "osAccount": "root",
+    "host": "PowerShell 7.6.9 (Core)"
   },
   "model": {
     "configured": "none (demo mode)",
@@ -31,17 +31,17 @@
     {
       "role": "config",
       "path": "config.example.json",
-      "sha256": "53e4ee6e7d516ecc2c137ae0c565b05d9d0c4589e29664d28f80a41990054fab"
+      "sha256": "3521c9a4f125684ac24dae7f1416c39845211a9ee62621c6f9ca77d0218e438c"
     },
     {
       "role": "workbook",
       "path": "samples/cases.xlsx",
-      "sha256": "58be5a50ad990fc1052a380749605fcda06ff83c007ac9b77c9b1e9a21ede77e"
+      "sha256": "d65ca3d1caee6ece53f5711542f8d938803673995a6894330984d22bc2055757"
     },
     {
       "role": "prompt-template",
       "path": "prompts/dossier-prompt.txt",
-      "sha256": "4e52d14939cfce1727df95c499f2a37644aae69c10c00a427bf483aebaec6272"
+      "sha256": "84af8e0dae6da6f1a00fac42eb35e705eed3bb329ebb56d2c2a5143177df2a34"
     },
     {
       "role": "report-template",
@@ -66,7 +66,7 @@
     {
       "role": "case-document",
       "path": "samples/documents/SYN-2026-007/lab-request.txt",
-      "sha256": "90e35fcc416362df31a92452d1fa7df24a837d7773130a2301dc71b0ad81870d"
+      "sha256": "c1e6d58ee0511e20b4d305232a8c2448ee7043a1366e510cc5a2a738de7d4a3f"
     },
     {
       "role": "case-document",
@@ -81,32 +81,32 @@
     {
       "role": "demo-response",
       "path": "samples/demo-response.md",
-      "sha256": "acb357d5c62c2b12caf747d0f05e2c7c18e6b647dc79066fa43e2a30aa7fac55"
+      "sha256": "3ee9e5edfd2149f32fd3691eff2d8b437132dd66d89ad562feec117a07530b41"
     }
   ],
   "artifacts": {
     "prompt": {
       "file": "prompt.txt",
-      "sha256": "ffed69c91d962628336967cc61ee9bccdcf2432cb2082d141d2658c4f68a9e8b"
+      "sha256": "1c795961d70653e5b4c46ac98abf8b5e9bb36a0dc8ae4582719f6e3e16ce7be7"
     },
     "statistics": {
       "file": "statistics.json",
-      "sha256": "6911bddb035feaaac4de7277b334828feeff3fead9c747447d8e75bf63a0cc0f"
+      "sha256": "0d0c2e7fd9ca4233b4806467f3d7952a6e39a779885210ddc9e7ddda7e292526"
     },
     "response": {
       "file": "response.md",
-      "sha256": "acb357d5c62c2b12caf747d0f05e2c7c18e6b647dc79066fa43e2a30aa7fac55"
+      "sha256": "3ee9e5edfd2149f32fd3691eff2d8b437132dd66d89ad562feec117a07530b41"
     },
     "report": {
-      "file": "complaint-dossier-20261030T023604Z-7f1975-DRAFT.docx",
-      "sha256": "4aafd2aeb0dafd8b6ef1eb6d1c015f6deb5a5fb705bd1c3972235f71e268adaf"
+      "file": "complaint-dossier-20261030T032002Z-f707e0-DRAFT.docx",
+      "sha256": "9b63140afe4f86297923e6bb770440630e19c36b2d8ee2807aea5ad3f7e63db4"
     }
   },
   "checks": [
     {
       "name": "Response is not empty",
       "passed": true,
-      "detail": "2312 characters"
+      "detail": "3117 characters"
     },
     {
       "name": "Response differs from prompt",
@@ -131,29 +131,29 @@
   },
   "events": [
     {
-      "atUtc": "2026-10-30T02:36:04Z",
+      "atUtc": "2026-10-30T03:20:02Z",
       "event": "run-started",
       "detail": "mode=Demo"
     },
     {
-      "atUtc": "2026-10-30T02:36:04Z",
+      "atUtc": "2026-10-30T03:20:02Z",
       "event": "cases-read",
       "detail": "10 cases, 6 documents"
     },
     {
-      "atUtc": "2026-10-30T02:36:05Z",
+      "atUtc": "2026-10-30T03:20:02Z",
       "event": "prompt-built",
-      "detail": "5602 characters"
+      "detail": "6182 characters"
     },
     {
-      "atUtc": "2026-10-30T02:36:05Z",
+      "atUtc": "2026-10-30T03:20:02Z",
       "event": "response-received",
       "detail": "demo response copied"
     },
     {
-      "atUtc": "2026-10-30T02:36:05Z",
+      "atUtc": "2026-10-30T03:20:02Z",
       "event": "report-written",
-      "detail": "complaint-dossier-20261030T023604Z-7f1975-DRAFT.docx"
+      "detail": "complaint-dossier-20261030T032002Z-f707e0-DRAFT.docx"
     }
   ]
 }

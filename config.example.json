@@ -8,6 +8,7 @@
       "ReceivedDate": "ReceivedDate",
       "Category": "Category",
       "ProductGroup": "ProductGroup",
+      "Batch": "Batch",
       "Severity": "Severity",
       "Status": "Status",
       "Description": "Description"
