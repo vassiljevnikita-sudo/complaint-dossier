@@ -2,7 +2,7 @@
 .SYNOPSIS
   Builds a complaint trend dossier: Excel cases -> statistics -> one prompt ->
   Microsoft 365 Copilot (or a prewritten demo response) -> DRAFT Word report
-  with a JSON audit trail.
+  with a JSON audit log (SHA-256 hashes).
 
 .EXAMPLE
   ./Invoke-ComplaintDossier.ps1 -Demo
@@ -142,7 +142,7 @@ New-DossierReport -TemplatePath $config.Paths.ReportTemplate -OutputPath $report
     -Cases $cases -Statistics $statistics -Response $response -Checks $checks
 Add-Event 'report-written' $reportName
 
-# 5. Audit trail
+# 5. Audit log (SHA-256 hashes)
 $artifact = { param($name) [pscustomobject]@{ file = $name; sha256 = (Get-Sha256 (Join-Path $runPath $name)) } }
 $audit = [pscustomobject][ordered]@{
     schema    = 'complaint-dossier/audit/v1'
