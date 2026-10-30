@@ -169,7 +169,7 @@ Describe 'Demo run, report and approval' {
         $script:Result.Report | Should -Match '-DRAFT\.docx$'
         $script:Result.Report | Should -Exist
     }
-    It 'marks the report as DRAFT in the page header and in the sign-off block' {
+    It 'marks the report as DRAFT in the page header and in the approval block' {
         $text = Get-DocxText $script:Result.Report
         $markers = Get-DossierMarkers
         foreach ($key in $markers.Keys) { $text | Should -Match ([regex]::Escape($markers[$key])) }
@@ -186,7 +186,7 @@ Describe 'Demo run, report and approval' {
         }
     }
     It 'records SHA-256 hashes that match the files' {
-        $script:Audit.schema | Should -Be 'complaint-dossier/audit/v1'
+        $script:Audit.schema | Should -Be 'complaint-dossier/audit/v2'
         $script:Audit.status | Should -Be 'DRAFT'
         $script:Audit.review.reviewer | Should -BeNullOrEmpty
         foreach ($name in 'prompt', 'statistics', 'response', 'report') {
@@ -210,21 +210,23 @@ Describe 'Demo run, report and approval' {
     It 'refuses approval without a reviewer name' {
         { Approve-DossierRun -RunPath $script:Run -Reviewer ' ' } | Should -Throw '*Reviewer name is required*'
     }
-    It 'signs the run: removes DRAFT, records reviewer and time, hashes the signed report' {
+    It 'approves the run: removes DRAFT, records reviewer and time, hashes the approved report' {
         & (Join-Path $script:Root 'Approve-ComplaintDossier.ps1') -RunPath $script:Run -Reviewer 'R. Viewer' 6> $null
         $audit = Read-JsonFile (Join-Path $script:Run 'audit.json')
         $audit.status | Should -Be 'APPROVED'
         $audit.review.reviewer | Should -Be 'R. Viewer'
-        $audit.review.signedAtUtc | Should -Match '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$'
+        $audit.review.approvedAtUtc | Should -Match '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$'
         $audit.review.draftSha256 | Should -Be $script:Audit.artifacts.report.sha256
         $audit.events[0].atUtc | Should -Be $script:Audit.events[0].atUtc
         $audit.events[-1].event | Should -Be 'approved'
-        $signed = Join-Path $script:Run $audit.artifacts.approvedReport.file
-        $signed | Should -Not -Match 'DRAFT'
-        Get-Sha256 $signed | Should -Be $audit.artifacts.approvedReport.sha256
-        $text = Get-DocxText $signed
+        $approved = Join-Path $script:Run $audit.artifacts.approvedReport.file
+        $approved | Should -Not -Match 'DRAFT'
+        Get-Sha256 $approved | Should -Be $audit.artifacts.approvedReport.sha256
+        $text = Get-DocxText $approved
         $text | Should -Not -MatchExactly 'DRAFT'
-        $text | Should -Match 'Reviewer: R\. Viewer'
+        $text | Should -Match 'Approved by: R\. Viewer'
+        $text | Should -Match 'Approved at \(UTC\): \d{4}-'
+        $text | Should -Not -Match '(?i)\b(signed|signs|sign-off)\b'
         $text | Should -Match 'Status: APPROVED'
         $text | Should -Match 'Accepted check failures: none \(all automated checks passed\)'
         $audit.review.exception | Should -BeNullOrEmpty
@@ -280,7 +282,7 @@ Describe 'Approval when automated checks failed' {
         { Approve-DossierRun -RunPath $run -Reviewer 'R. Viewer' -AcceptFailedChecks -Justification 'reason' } | Should -Throw '*All automated checks passed*'
         (Read-JsonFile (Join-Path $run 'audit.json')).status | Should -Be 'DRAFT'
     }
-    It 'records an override with justification in audit.json and in the signed report' {
+    It 'records an override with justification in audit.json and in the approved report' {
         $run = Copy-FailedRun 'override'
         $reason = 'SYN-2026-099 is a typo for SYN-2026-009; checked against the case list.'
         & (Join-Path $script:Root 'Approve-ComplaintDossier.ps1') -RunPath $run -Reviewer 'R. Viewer' -AcceptFailedChecks -Justification $reason 6> $null

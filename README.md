@@ -1,12 +1,12 @@
 # Complaint Dossier
 
-A complaint trend review means counting cases, reading case files and writing a summary by hand. Complaint Dossier reads the cases from Excel, computes the statistics, lets Microsoft 365 Copilot draft the assessment and builds a Word report that stays a DRAFT until a named reviewer signs it.
+A complaint trend review means counting cases, reading case files and writing a summary by hand. Complaint Dossier reads the cases from Excel, computes the statistics, lets Microsoft 365 Copilot draft the assessment and builds a Word report that stays a DRAFT until a named reviewer approves it.
 
 Status: the demo mode is tested in CI on every push. It uses a prewritten answer instead of Copilot. The hand-off to the Copilot desktop app is implemented, but the full live round trip has not been confirmed against the real app yet ([details](#live-copilot-test-30-october-2026)).
 
 [Sample report (PDF)](docs/sample/complaint-dossier-sample-DRAFT.pdf) · [all files of the sample run](docs/sample/) · [Design note: GAMP 5 categories, risks, what validation would still need](docs/design-note.md)
 
-**Kurzfassung (Deutsch):** PowerShell-Werkzeug für die Trendauswertung von Reklamationen. Es liest Fälle aus einer Excel-Datei, berechnet Statistiken, übergibt einen Prompt an die Desktop-App von Microsoft 365 Copilot und erzeugt einen Word-Bericht und ein Audit-Log (SHA-256-Hashes). Der Bericht bleibt ein Entwurf, bis eine prüfende Person ihn freigibt. Der Demo-Modus ist in CI getestet. Die Übergabe an Copilot ist umgesetzt, der vollständige Live-Ablauf mit der echten App ist aber noch nicht bestätigt. Ausgelegt nach GAMP-5-Prinzipien, nicht validiert. Alle Beispieldaten sind synthetisch.
+**Kurzfassung (Deutsch):** PowerShell-Werkzeug für die Trendauswertung von Reklamationen. Es liest Fälle aus einer Excel-Datei, berechnet Statistiken, übergibt einen Prompt an die Desktop-App von Microsoft 365 Copilot und erzeugt einen Word-Bericht und ein Audit-Log (SHA-256-Hashes). Der Bericht bleibt ein Entwurf, bis eine prüfende Person ihn freigibt. Der Demo-Modus ist in CI getestet. Die Übergabe an Copilot ist umgesetzt, der vollständige Live-Ablauf mit der echten App ist aber noch nicht bestätigt. Entworfen nach den Grundsätzen von GAMP 5; nicht validiert. Alle Beispieldaten sind synthetisch.
 
 ![Demo run: draft report, shared batch from the statistics, approval, audit log](docs/images/demo.gif)
 
@@ -46,7 +46,7 @@ PowerShell 7 or Windows PowerShell 5.1 (the demo runs on either; the live Copilo
 
 | File | Content |
 | --- | --- |
-| `complaint-dossier-<run id>-DRAFT.docx` | The report: statistics, case list with product group and batch, AI-drafted assessment, automated checks, sign-off block |
+| `complaint-dossier-<run id>-DRAFT.docx` | The report: statistics, case list with product group and batch, AI-drafted assessment, automated checks, approval block |
 | `prompt.txt` | The exact prompt, as it would go to Copilot |
 | `response.md` | The answer (in demo mode the prewritten sample) |
 | `statistics.json` | Counts by category, product group and month; batches with more than one case |
@@ -76,7 +76,7 @@ The tool opens a new chat, selects the configured model, attaches every file fro
 ./Approve-ComplaintDossier.ps1 -RunPath out/<run id> -Reviewer 'A. Reviewer' -Comment 'Checked against the case files.'
 ```
 
-Approval recomputes the hashes of prompt, response, statistics and draft report and refuses if anything changed after the run. It writes a signed copy without the DRAFT marking, adds reviewer, time and the new hash to `audit.json`, and keeps the draft.
+Approval recomputes the hashes of prompt, response, statistics and draft report and refuses if anything changed after the run. It writes an approved copy without the DRAFT marking, adds reviewer, time and the new hash to `audit.json`, and keeps the draft.
 
 Approval also refuses while any automated check in `audit.json` has failed, for example when the answer cites a case ID that is not in the workbook or misses a required section. It lists the failed checks, and the run stays DRAFT. Usually the right step is a new run. If the reviewer decides the failure is acceptable, they have to say why:
 
@@ -84,7 +84,7 @@ Approval also refuses while any automated check in `audit.json` has failed, for 
 ./Approve-ComplaintDossier.ps1 -RunPath out/<run id> -Reviewer 'A. Reviewer' -AcceptFailedChecks -Justification 'SYN-2026-099 is a typo for SYN-2026-009; checked against the case list.'
 ```
 
-The justification must not be empty. The signed report then says "APPROVED WITH A DOCUMENTED EXCEPTION" and lists the accepted checks with the justification. `audit.json` stores the same under `review.exception`.
+The justification must not be empty. The approved report then says "APPROVED WITH A DOCUMENTED EXCEPTION" and lists the accepted checks with the justification. `audit.json` stores the same under `review.exception`.
 
 ### Your own data
 
@@ -115,7 +115,7 @@ Run against the Microsoft 365 Copilot desktop app (package version 19.2610.35011
 
 ```text
 Invoke-ComplaintDossier.ps1     entry point: -Demo or -Live
-Approve-ComplaintDossier.ps1    reviewer sign-off
+Approve-ComplaintDossier.ps1    reviewer approval
 src/ComplaintDossier.psm1       Excel reading, statistics, prompt, checks, Word report, audit, approval
 src/Copilot/                    UI automation for the Copilot desktop app (Windows PowerShell 5.1)
 prompts/  templates/            prompt template and neutral Word template

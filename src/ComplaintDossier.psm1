@@ -13,12 +13,12 @@ $script:FixedZipTime = [DateTimeOffset]::new(2026, 1, 1, 0, 0, 0, [TimeSpan]::Ze
 
 # Text markers that Approve-ComplaintDossier replaces. Each must appear in the draft.
 $script:Markers = [ordered]@{
-    Banner    = 'DRAFT - NOT REVIEWED - NOT FOR USE'
-    Status    = 'Status: DRAFT (awaiting human review)'
-    Reviewer  = 'Reviewer: (not signed)'
-    SignedAt  = 'Signed at (UTC): (not signed)'
-    Comment   = 'Review comment: (none)'
-    Exception = 'Accepted check failures: (not signed)'
+    Banner     = 'DRAFT - NOT REVIEWED - NOT FOR USE'
+    Status     = 'Status: DRAFT (awaiting human review)'
+    Reviewer   = 'Approved by: (not approved)'
+    ApprovedAt = 'Approved at (UTC): (not approved)'
+    Comment    = 'Review comment: (none)'
+    Exception  = 'Accepted check failures: (not approved)'
 }
 
 # Neutral case schema. Workbook columns are mapped to these names in Workbook.Columns;
@@ -703,10 +703,10 @@ function New-DossierReport {
                     , @($_.Name, $result, $_.Detail)
                 })))
 
-    [void]$body.Append((New-WParagraph '5 Review and sign-off' -Style 'Heading1'))
-    [void]$body.Append((New-WParagraph 'This report is a draft until a reviewer has checked every statement in section 3 against the case records and signs it with Approve-ComplaintDossier.ps1. The signature and the file hashes are recorded in audit.json.'))
+    [void]$body.Append((New-WParagraph '5 Review and approval' -Style 'Heading1'))
+    [void]$body.Append((New-WParagraph 'This report is a draft until a reviewer has checked every statement in section 3 against the case records and approves it with Approve-ComplaintDossier.ps1. The approval (typed reviewer name and time) and the file hashes are recorded in audit.json. A typed name is not an electronic signature.'))
     [void]$body.Append((New-WParagraph 'Approval is refused while an automated check in section 4 has failed. A reviewer can accept failed checks only by giving a written justification, which is printed here and stored in audit.json as a documented exception.'))
-    foreach ($key in 'Status', 'Reviewer', 'SignedAt', 'Comment', 'Exception') { [void]$body.Append((New-WParagraph $m[$key])) }
+    foreach ($key in 'Status', 'Reviewer', 'ApprovedAt', 'Comment', 'Exception') { [void]$body.Append((New-WParagraph $m[$key])) }
 
     $bodyXml = $body.ToString()
     $bannerXml = New-WParagraph $m.Banner -Bold -Color 'C00000'
@@ -823,13 +823,13 @@ function Save-AuditLog {
 
 function Approve-DossierRun {
     <#
-      Human sign-off. Verifies that prompt, response and draft report still match
-      the hashes in audit.json, writes a signed copy of the report without the
+      Human approval. Verifies that prompt, response and draft report still match
+      the hashes in audit.json, writes an approved copy of the report without the
       DRAFT markers, and records reviewer, time and new hash. The draft stays.
 
       Approval is refused while any automated response check in audit.json has
       failed. -AcceptFailedChecks with a non-empty -Justification overrides that;
-      the override is printed in the signed report and stored in audit.json as a
+      the override is printed in the approved report and stored in audit.json as a
       documented exception.
     #>
     param(
@@ -873,13 +873,13 @@ function Approve-DossierRun {
         if ($actual -ne $artifact.sha256) { throw "Hash mismatch for $($artifact.file): audit has $($artifact.sha256), file has $actual. The file changed after the run. Approval refused." }
     }
 
-    $signedAt = Get-UtcStamp
+    $approvedAt = Get-UtcStamp
     $m = $script:Markers
     $replace = [ordered]@{
-        $m.Banner   = "REVIEWED AND APPROVED by $Reviewer on $signedAt"
-        $m.Status   = 'Status: APPROVED'
-        $m.Reviewer = "Reviewer: $Reviewer"
-        $m.SignedAt = "Signed at (UTC): $signedAt"
+        $m.Banner     = "REVIEWED AND APPROVED by $Reviewer on $approvedAt"
+        $m.Status     = 'Status: APPROVED'
+        $m.Reviewer   = "Approved by: $Reviewer"
+        $m.ApprovedAt = "Approved at (UTC): $approvedAt"
     }
     $commentText = 'Review comment: none given'
     if ($Comment) { $commentText = "Review comment: $Comment" }
@@ -890,7 +890,7 @@ function Approve-DossierRun {
             acceptedFailedChecks = @($failed | ForEach-Object { [pscustomobject]@{ name = $_.name; detail = $_.detail } })
             justification        = $Justification.Trim()
         }
-        $replace[$m.Banner] = "REVIEWED AND APPROVED WITH A DOCUMENTED EXCEPTION by $Reviewer on $signedAt"
+        $replace[$m.Banner] = "REVIEWED AND APPROVED WITH A DOCUMENTED EXCEPTION by $Reviewer on $approvedAt"
         $replace[$m.Status] = 'Status: APPROVED with a documented exception (failed automated checks accepted)'
         $replace[$m.Exception] = "Accepted check failures: DOCUMENTED EXCEPTION. Failed checks: $failedText. Justification: $($exception.justification)"
     } else {
@@ -932,7 +932,7 @@ function Approve-DossierRun {
     $audit.status = 'APPROVED'
     $audit.review = [pscustomobject]@{
         reviewer        = $Reviewer
-        signedAtUtc     = $signedAt
+        approvedAtUtc   = $approvedAt
         comment         = $Comment
         osAccount       = [Environment]::UserName
         draftSha256     = $audit.artifacts.report.sha256
@@ -940,12 +940,12 @@ function Approve-DossierRun {
     }
     $audit.artifacts | Add-Member -NotePropertyName approvedReport -NotePropertyValue ([pscustomobject]@{ file = $approvedName; sha256 = (Get-Sha256 $approved) }) -Force
     if ($exception) {
-        $audit.events += [pscustomobject]@{ atUtc = $signedAt; event = 'approved-with-exception'; detail = "by $Reviewer; accepted failed checks: $failedText" }
+        $audit.events += [pscustomobject]@{ atUtc = $approvedAt; event = 'approved-with-exception'; detail = "by $Reviewer; accepted failed checks: $failedText" }
     } else {
-        $audit.events += [pscustomobject]@{ atUtc = $signedAt; event = 'approved'; detail = "by $Reviewer" }
+        $audit.events += [pscustomobject]@{ atUtc = $approvedAt; event = 'approved'; detail = "by $Reviewer" }
     }
     Save-AuditLog $audit $auditPath
-    [pscustomobject]@{ RunId = $audit.runId; Report = $approved; Sha256 = $audit.artifacts.approvedReport.sha256; SignedAt = $signedAt; Exception = $exception }
+    [pscustomobject]@{ RunId = $audit.runId; Report = $approved; Sha256 = $audit.artifacts.approvedReport.sha256; ApprovedAt = $approvedAt; Exception = $exception }
 }
 
 Export-ModuleMember -Function *-*
