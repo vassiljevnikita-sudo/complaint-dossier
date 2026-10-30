@@ -1,0 +1,52 @@
+{
+  "Workbook": {
+    "Path": "samples/cases.xlsx",
+    "Sheet": "Cases",
+    "HeaderRow": 2,
+    "Columns": {
+      "CaseId": "CaseId",
+      "ReceivedDate": "ReceivedDate",
+      "Category": "Category",
+      "ProductGroup": "ProductGroup",
+      "Severity": "Severity",
+      "Status": "Status",
+      "Description": "Description"
+    }
+  },
+  "Documents": {
+    "Path": "samples/documents",
+    "Extensions": [".txt", ".md"],
+    "MaxCharsPerDocument": 4000
+  },
+  "Prompt": {
+    "TemplatePath": "prompts/dossier-prompt.txt",
+    "RequiredSections": ["Summary", "Trends", "Cases needing attention", "Suggested follow-up", "Data gaps"],
+    "MaskContactData": true
+  },
+  "Report": {
+    "TemplatePath": "templates/report-template.docx",
+    "OutputPath": "out",
+    "Title": "Complaint trend dossier"
+  },
+  "Demo": {
+    "ResponsePath": "samples/demo-response.md"
+  },
+  "Copilot": {
+    "WindowTitle": "Microsoft 365 Copilot",
+    "PreferredModel": "",
+    "PreferredModelGroup": "",
+    "Upload": {
+      "Path": "samples/attachments",
+      "Extensions": [".pdf", ".docx", ".xlsx", ".txt", ".csv", ".png", ".jpg"],
+      "MaxFiles": 3,
+      "MaxFileSizeMB": 10
+    },
+    "StartDelaySeconds": 3,
+    "NewChatTimeoutSeconds": 30,
+    "UploadTimeoutSeconds": 60,
+    "ResponseTimeoutSeconds": 240,
+    "StableReadyChecks": 3,
+    "PollMilliseconds": 1000,
+    "ModelMenuTimeoutMilliseconds": 3000
+  }
+}

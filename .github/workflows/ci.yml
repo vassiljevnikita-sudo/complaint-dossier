@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-demo:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pester 5
+        shell: pwsh
+        run: Install-Module Pester -RequiredVersion 5.7.1 -Force -Scope CurrentUser -SkipPublisherCheck
+
+      - name: Pester tests (PowerShell 7)
+        shell: pwsh
+        run: |
+          Import-Module Pester -RequiredVersion 5.7.1
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = 'testResults.xml'
+          Invoke-Pester -Configuration $config
+
+      - name: Demo run (PowerShell 7)
+        shell: pwsh
+        run: ./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo
+
+      - name: Demo run and approval (Windows PowerShell 5.1)
+        shell: powershell
+        run: |
+          ./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo-ps51
+          ./Approve-ComplaintDossier.ps1 -RunPath out/demo-ps51 -Reviewer 'CI check' -Comment 'Automated approval test on synthetic data.'
+
+      - name: Upload demo report
+        uses: actions/upload-artifact@v4
+        with:
+          name: complaint-dossier-demo
+          path: |
+            out/demo/*.docx
+            out/demo/audit.json
+            out/demo/prompt.txt
+            out/demo/response.md
+          retention-days: 7
+          if-no-files-found: error
+
+  scans:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Employer denylist (files, Office file contents, full history)
+        env:
+          DENYLIST: ${{ secrets.DENYLIST }}
+        run: |
+          terms="$RUNNER_TEMP/denylist.txt"
+          printf '%s\n' "$DENYLIST" | tr -d '\r' | sed '/^[[:space:]]*$/d' > "$terms"
+          if [ ! -s "$terms" ]; then echo "Secret DENYLIST is empty or missing."; exit 1; fi
+          git log -p --all > "$RUNNER_TEMP/history.txt"
+          : > "$RUNNER_TEMP/office.txt"
+          git ls-files '*.docx' '*.xlsx' | while read -r f; do unzip -p "$f" >> "$RUNNER_TEMP/office.txt"; done
+          hits=0
+          n=0
+          while IFS= read -r term; do
+            n=$((n + 1))
+            if git grep -I -i -F -q -e "$term"; then echo "term $n: hit in tracked files"; hits=1; fi
+            if grep -i -F -q -e "$term" "$RUNNER_TEMP/office.txt"; then echo "term $n: hit inside .docx/.xlsx"; hits=1; fi
+            if grep -i -F -q -e "$term" "$RUNNER_TEMP/history.txt"; then echo "term $n: hit in git history"; hits=1; fi
+          done < "$terms"
+          echo "Checked $n terms."
+          exit $hits
+
+      - name: gitleaks (full history)
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz | tar -xz -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --redact --verbose .

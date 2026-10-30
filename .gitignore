@@ -1,0 +1,12 @@
+# Local configuration with your own paths and model choice
+/config.json
+/config.*.json
+!/config.example.json
+
+# Run output (reports, prompts, responses, audit logs)
+/out/
+/testResults.xml
+
+# Office lock and temp files
+~$*
+*.tmp
