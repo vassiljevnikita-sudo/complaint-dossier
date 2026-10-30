@@ -1,6 +1,8 @@
 # Complaint Dossier
 
-Writing the report for each product complaint by hand means reading the row in the complaint list, looking up earlier complaints for the same batch and product, reading the case folder and then writing the same report structure again. Complaint Dossier does the preparation: it reads the complaint list from Excel, builds one prompt per complaint from that row, the similar complaints and the case folder, lets Microsoft 365 Copilot draft the report, and writes one Word report per complaint. Every report stays a DRAFT until a named reviewer has checked and approved it.
+Complaint Dossier drafts one Word report per product complaint from an Excel complaint list with Microsoft 365 Copilot. Every report stays a DRAFT until a named reviewer has checked and approved it.
+
+Writing each report by hand means reading the complaint's row, looking up earlier complaints for the same batch and product, reading the case folder and writing the same structure again. The tool does the preparation: it builds one prompt per complaint from that row, the similar complaints and the case folder, lets Copilot draft the report and writes it to Word.
 
 Status: the demo mode is tested in CI on every push. It uses prewritten answers instead of Copilot. The live path through the Copilot desktop app completed one full round trip on 30 October 2026, but not yet with the final code ([details](#live-copilot-test-30-october-2026)).
 
