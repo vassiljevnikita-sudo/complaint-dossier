@@ -8,3 +8,6 @@
 *.pdf binary
 *.png binary
 *.gif binary
+# The committed sample run must stay byte for byte as generated, so the
+# hashes in docs/sample/audit.json keep matching.
+docs/sample/** -text

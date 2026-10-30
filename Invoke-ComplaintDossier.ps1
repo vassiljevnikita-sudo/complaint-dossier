@@ -89,7 +89,8 @@ $prompt = New-DossierPrompt -Template (Read-Utf8File $config.Paths.PromptTemplat
 $promptFile = Join-Path $runPath 'prompt.txt'
 Write-Utf8File $promptFile $prompt
 $statisticsFile = Join-Path $runPath 'statistics.json'
-Write-Utf8File $statisticsFile (($statistics | ConvertTo-Json -Depth 5) + "`n")
+# JSON with LF line ends, so the hash is the same on every platform.
+Write-Utf8File $statisticsFile (($statistics | ConvertTo-Json -Depth 5).Replace("`r`n", "`n") + "`n")
 Add-Event 'prompt-built' "$($prompt.Length) characters"
 
 # 3. Response

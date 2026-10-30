@@ -780,7 +780,8 @@ function Invoke-CopilotHandoff {
 
 function Save-AuditLog {
     param([Parameter(Mandatory)]$Audit, [Parameter(Mandatory)][string]$Path)
-    Write-Utf8File $Path (($Audit | ConvertTo-Json -Depth 10) + "`n")
+    # LF line ends on every platform, like statistics.json.
+    Write-Utf8File $Path (($Audit | ConvertTo-Json -Depth 10).Replace("`r`n", "`n") + "`n")
 }
 
 function Approve-DossierRun {
