@@ -21,6 +21,10 @@ $script:Markers = [ordered]@{
     Exception = 'Accepted check failures: (not signed)'
 }
 
+# Neutral case schema. Workbook columns are mapped to these names in Workbook.Columns;
+# only CaseId, ReceivedDate, Category and Description are required.
+$script:CaseFields = @('CaseId', 'ReceivedDate', 'Category', 'ProductGroup', 'Batch', 'Severity', 'Status', 'Description')
+
 function Get-DossierVersion { $script:ToolVersion }
 function Get-DossierMarkers { $script:Markers }
 
@@ -279,7 +283,7 @@ function Import-DossierCases {
     if ($rows.Count -eq 0) { throw "Worksheet '$($wb.Sheet)' contains no cases." }
 
     $map = [ordered]@{}
-    foreach ($field in 'CaseId', 'ReceivedDate', 'Category', 'ProductGroup', 'Severity', 'Status', 'Description') {
+    foreach ($field in $script:CaseFields) {
         $column = [string](Get-ConfigValue $wb.Columns $field)
         if ([string]::IsNullOrWhiteSpace($column)) { continue }
         if (-not ($rows[0].PSObject.Properties.Name -contains $column)) {
@@ -292,7 +296,7 @@ function Import-DossierCases {
         $id = ([string]$row.($map.CaseId)).Trim()
         if (-not $id) { throw "Row $($row._Row) has no case ID." }
         $case = [ordered]@{}
-        foreach ($field in 'CaseId', 'ReceivedDate', 'Category', 'ProductGroup', 'Severity', 'Status', 'Description') {
+        foreach ($field in $script:CaseFields) {
             $value = ''
             if ($map.Contains($field)) { $value = $row.($map[$field]) }
             if ($field -eq 'ReceivedDate') { $value = ConvertTo-CaseDate $value $id }
@@ -317,11 +321,23 @@ function Import-DossierCases {
 # ---------------------------------------------------------------- statistics
 
 function Get-DossierStatistics {
-    <# Counts by category and a month-by-month trend (months without cases count as 0). #>
+    <#
+      Counts by category and product group, a month-by-month trend (months
+      without cases count as 0) and the batches that occur in more than one case.
+    #>
     param([Parameter(Mandatory)][object[]]$Cases)
     $total = $Cases.Count
+    $share = { param($count) [math]::Round(100.0 * $count / $total, 1) }
     $byCategory = @($Cases | Group-Object Category | Sort-Object @{ Expression = 'Count'; Descending = $true }, Name | ForEach-Object {
-            [pscustomobject]@{ Category = $_.Name; Count = $_.Count; Share = [math]::Round(100.0 * $_.Count / $total, 1) }
+            [pscustomobject]@{ Category = $_.Name; Count = $_.Count; Share = (& $share $_.Count) }
+        })
+    $groupOf = { $value = [string](Get-ConfigValue $_ 'ProductGroup'); if ($value.Trim()) { $value.Trim() } else { '(not given)' } }
+    $byProductGroup = @($Cases | Group-Object $groupOf | Sort-Object @{ Expression = 'Count'; Descending = $true }, Name | ForEach-Object {
+            [pscustomobject]@{ ProductGroup = $_.Name; Count = $_.Count; Share = (& $share $_.Count) }
+        })
+    $withBatch = @($Cases | Where-Object { ([string](Get-ConfigValue $_ 'Batch')).Trim() })
+    $sharedBatches = @($withBatch | Group-Object { ([string](Get-ConfigValue $_ 'Batch')).Trim() } | Where-Object Count -gt 1 | Sort-Object Name | ForEach-Object {
+            [pscustomobject]@{ Batch = $_.Name; Count = $_.Count; CaseIds = @($_.Group | ForEach-Object { $_.CaseId } | Sort-Object) }
         })
     $dates = @($Cases | ForEach-Object { $_.ReceivedDate } | Sort-Object)
     $first = $dates[0]
@@ -334,12 +350,23 @@ function Get-DossierStatistics {
         $month = $month.AddMonths(1)
     }
     [pscustomobject]@{
-        Total      = $total
-        From       = $first.ToString('yyyy-MM-dd')
-        To         = $last.ToString('yyyy-MM-dd')
-        ByCategory = @($byCategory)
-        ByMonth    = @($byMonth)
+        Total          = $total
+        From           = $first.ToString('yyyy-MM-dd')
+        To             = $last.ToString('yyyy-MM-dd')
+        ByCategory     = @($byCategory)
+        ByProductGroup = @($byProductGroup)
+        ByMonth        = @($byMonth)
+        CasesWithBatch = $withBatch.Count
+        SharedBatches  = @($sharedBatches)
     }
+}
+
+function Get-SharedBatchNote {
+    <# Sentence shown instead of the shared-batch table when there is nothing to list. #>
+    param([Parameter(Mandatory)]$Statistics)
+    if ($Statistics.CasesWithBatch -eq 0) { return 'No batch numbers in the input.' }
+    if (@($Statistics.SharedBatches).Count -eq 0) { return "No batch occurs in more than one case ($($Statistics.CasesWithBatch) of $($Statistics.Total) cases have a batch number)." }
+    $null
 }
 
 # ---------------------------------------------------------------- documents and uploads
@@ -417,9 +444,13 @@ function New-DossierPrompt {
     )
     $clean = { param($t) if ($Mask) { Protect-PromptText $t } else { $t } }
     $stats = "Cases by category:`n" + (Format-MarkdownTable @('Category', 'Count', 'Share %') @($Statistics.ByCategory | ForEach-Object { , @($_.Category, $_.Count, $_.Share.ToString('0.0', [Globalization.CultureInfo]::InvariantCulture)) }))
+    $stats += "`n`nCases by product group:`n" + (Format-MarkdownTable @('Product group', 'Count', 'Share %') @($Statistics.ByProductGroup | ForEach-Object { , @($_.ProductGroup, $_.Count, $_.Share.ToString('0.0', [Globalization.CultureInfo]::InvariantCulture)) }))
     $stats += "`n`nCases by month:`n" + (Format-MarkdownTable @('Month', 'Count') @($Statistics.ByMonth | ForEach-Object { , @($_.Month, $_.Count) }))
-    $caseTable = Format-MarkdownTable @('Case ID', 'Received', 'Category', 'Product group', 'Severity', 'Status', 'Description') @($Cases | ForEach-Object {
-            , @($_.CaseId, $_.ReceivedDate.ToString('yyyy-MM-dd'), $_.Category, $_.ProductGroup, $_.Severity, $_.Status, (& $clean (($_.Description -replace '\s+', ' '))))
+    $batchNote = Get-SharedBatchNote $Statistics
+    if ($batchNote) { $stats += "`n`nBatches with more than one case: $batchNote" }
+    else { $stats += "`n`nBatches with more than one case:`n" + (Format-MarkdownTable @('Batch', 'Count', 'Case IDs') @($Statistics.SharedBatches | ForEach-Object { , @($_.Batch, $_.Count, ($_.CaseIds -join ', ')) })) }
+    $caseTable = Format-MarkdownTable @('Case ID', 'Received', 'Category', 'Product group', 'Batch', 'Severity', 'Status', 'Description') @($Cases | ForEach-Object {
+            , @($_.CaseId, $_.ReceivedDate.ToString('yyyy-MM-dd'), $_.Category, (Get-ConfigValue $_ 'ProductGroup'), (Get-ConfigValue $_ 'Batch'), $_.Severity, $_.Status, (& $clean (($_.Description -replace '\s+', ' '))))
         })
     $docText = 'No case documents.'
     if (@($Documents).Count) {
@@ -644,6 +675,8 @@ function New-DossierReport {
     [void]$body.Append((New-WParagraph '1 Statistics' -Style 'Heading1'))
     [void]$body.Append((New-WParagraph 'Cases by category' -Style 'Heading2'))
     [void]$body.Append((New-WTable @('Category', 'Count', 'Share %') @($Statistics.ByCategory | ForEach-Object { , @($_.Category, $_.Count, $_.Share.ToString('0.0', [Globalization.CultureInfo]::InvariantCulture)) })))
+    [void]$body.Append((New-WParagraph 'Cases by product group' -Style 'Heading2'))
+    [void]$body.Append((New-WTable @('Product group', 'Count', 'Share %') @($Statistics.ByProductGroup | ForEach-Object { , @($_.ProductGroup, $_.Count, $_.Share.ToString('0.0', [Globalization.CultureInfo]::InvariantCulture)) })))
     [void]$body.Append((New-WParagraph 'Cases by month' -Style 'Heading2'))
     $peak = ($Statistics.ByMonth | Measure-Object Count -Maximum).Maximum
     [void]$body.Append((New-WTable @('Month', 'Count', 'Trend') @($Statistics.ByMonth | ForEach-Object {
@@ -651,9 +684,13 @@ function New-DossierReport {
                     if ($peak -gt 0) { $bar = ([string][char]0x2588) * [int][math]::Round(10.0 * $_.Count / $peak) }
                     , @($_.Month, $_.Count, $bar)
                 }) -ColumnColor @{ 2 = '9E9E9E' }))
+    [void]$body.Append((New-WParagraph 'Batches with more than one case' -Style 'Heading2'))
+    $batchNote = Get-SharedBatchNote $Statistics
+    if ($batchNote) { [void]$body.Append((New-WParagraph $batchNote)) }
+    else { [void]$body.Append((New-WTable @('Batch', 'Count', 'Case IDs') @($Statistics.SharedBatches | ForEach-Object { , @($_.Batch, $_.Count, ($_.CaseIds -join ', ')) }))) }
 
     [void]$body.Append((New-WParagraph '2 Case list' -Style 'Heading1'))
-    [void]$body.Append((New-WTable @('Case ID', 'Received', 'Category', 'Severity', 'Status') @($Cases | ForEach-Object { , @($_.CaseId, $_.ReceivedDate.ToString('yyyy-MM-dd'), $_.Category, $_.Severity, $_.Status) })))
+    [void]$body.Append((New-WTable @('Case ID', 'Received', 'Category', 'Product group', 'Batch', 'Severity', 'Status') @($Cases | ForEach-Object { , @($_.CaseId, $_.ReceivedDate.ToString('yyyy-MM-dd'), $_.Category, (Get-ConfigValue $_ 'ProductGroup'), (Get-ConfigValue $_ 'Batch'), $_.Severity, $_.Status) })))
 
     [void]$body.Append((New-WParagraph '3 AI-drafted assessment' -Style 'Heading1'))
     [void]$body.Append((New-WParagraph $Run.ResponseNote -Style 'Note'))

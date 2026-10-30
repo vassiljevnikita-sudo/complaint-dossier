@@ -29,6 +29,28 @@
       "Share": 10.0
     }
   ],
+  "ByProductGroup": [
+    {
+      "ProductGroup": "Tablets",
+      "Count": 5,
+      "Share": 50.0
+    },
+    {
+      "ProductGroup": "Capsules",
+      "Count": 2,
+      "Share": 20.0
+    },
+    {
+      "ProductGroup": "Oral solution",
+      "Count": 2,
+      "Share": 20.0
+    },
+    {
+      "ProductGroup": "Cream",
+      "Count": 1,
+      "Share": 10.0
+    }
+  ],
   "ByMonth": [
     {
       "Month": "2026-01",
@@ -53,6 +75,17 @@
     {
       "Month": "2026-06",
       "Count": 1
+    }
+  ],
+  "CasesWithBatch": 10,
+  "SharedBatches": [
+    {
+      "Batch": "SYN-LOT-26A019",
+      "Count": 2,
+      "CaseIds": [
+        "SYN-2026-009",
+        "SYN-2026-010"
+      ]
     }
   ]
 }

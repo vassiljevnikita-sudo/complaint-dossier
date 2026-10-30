@@ -6,7 +6,7 @@ Status: the demo mode is tested in CI on every push. It uses a prewritten answer
 
 [Sample report (PDF)](docs/sample/complaint-dossier-sample-DRAFT.pdf) · [all files of the sample run](docs/sample/) · [Design note: GAMP 5 categories, risks, what validation would still need](docs/design-note.md)
 
-**Kurzfassung (Deutsch):** PowerShell-Werkzeug für die Trendauswertung von Reklamationen. Es liest Fälle aus einer Excel-Datei, berechnet Statistiken, übergibt einen Prompt an die Microsoft 365 Copilot Desktop-App und erzeugt einen Word-Bericht mit Audit-Trail. Der Bericht bleibt ein Entwurf, bis eine prüfende Person ihn freigibt. Der Demo-Modus ist in CI getestet. Die Übergabe an Copilot ist umgesetzt, der vollständige Live-Ablauf mit der echten App ist aber noch nicht bestätigt. Ausgelegt nach GAMP-5-Prinzipien, nicht validiert. Alle Beispieldaten sind synthetisch.
+**Kurzfassung (Deutsch):** PowerShell-Werkzeug für die Trendauswertung von Reklamationen. Es liest Fälle aus einer Excel-Datei, berechnet Statistiken, übergibt einen Prompt an die Desktop-App von Microsoft 365 Copilot und erzeugt einen Word-Bericht mit Audit-Trail. Der Bericht bleibt ein Entwurf, bis eine prüfende Person ihn freigibt. Der Demo-Modus ist in CI getestet. Die Übergabe an Copilot ist umgesetzt, der vollständige Live-Ablauf mit der echten App ist aber noch nicht bestätigt. Ausgelegt nach GAMP-5-Prinzipien, nicht validiert. Alle Beispieldaten sind synthetisch.
 
 ![Demo run: draft report, approval, audit log](docs/images/demo.gif)
 
@@ -21,13 +21,11 @@ cd complaint-dossier
 ./Approve-ComplaintDossier.ps1 -RunPath out/<run id> -Reviewer 'Your Name'
 ```
 
-The demo uses the 10 synthetic cases in `samples/` and a prewritten answer instead of Copilot. CI runs the same command on every push. The output of one such run is committed in [docs/sample/](docs/sample/), so you can read the report without running anything.
+The demo uses the 10 synthetic cases in `samples/` (with invented batch numbers in the format `SYN-LOT-26A019`) and a prewritten answer instead of Copilot. CI runs the same command on every push. The output of one such run is committed in [docs/sample/](docs/sample/), so you can read the report without running anything.
 
 ## My role
 
-Complaint Dossier is a public reimplementation of a workflow I first built in my working-student job in pharmaceutical quality assurance. I rebuilt it with synthetic data and a neutral report template. Nothing from the original environment is in this repository.
-
-I wrote the requirements, reviewed and tested the code. The public version was written with an AI coding agent (Claude), which the commits name as co-author.
+Complaint Dossier is a public reimplementation of a workflow I first built in my working-student job in pharmaceutical quality assurance. For this version I set the requirements and the scope. An AI coding agent (Claude) wrote the code, tests and documentation, and the commits name it as co-author. The data is synthetic and the report template is neutral. Nothing from the original environment is in this repository.
 
 ## Tech stack
 
@@ -48,10 +46,10 @@ PowerShell 7 or Windows PowerShell 5.1 (the demo runs on either; the live Copilo
 
 | File | Content |
 | --- | --- |
-| `complaint-dossier-<run id>-DRAFT.docx` | The report: statistics, case list, AI-drafted assessment, automated checks, sign-off block |
+| `complaint-dossier-<run id>-DRAFT.docx` | The report: statistics, case list with product group and batch, AI-drafted assessment, automated checks, sign-off block |
 | `prompt.txt` | The exact prompt, as it would go to Copilot |
 | `response.md` | The answer (in demo mode the prewritten sample) |
-| `statistics.json` | Counts by category and by month |
+| `statistics.json` | Counts by category, product group and month; batches with more than one case |
 | `audit.json` | SHA-256 of every input and output, timestamps, checks, reviewer field |
 
 ![First page of the generated draft report](docs/images/report-page1.png)
@@ -90,7 +88,7 @@ The justification must not be empty. The signed report then says "APPROVED WITH 
 
 ### Your own data
 
-The workbook columns are mapped in `Workbook.Columns`, so the tool works with other column names. Case documents are text files in `<Documents.Path>/<case id>/`. The prompt lives in `prompts/dossier-prompt.txt`, the report layout in `templates/report-template.docx` (regenerate it with `tools/New-ReportTemplate.ps1`, or use your own .docx with a `{{REPORT_BODY}}` paragraph). `tools/New-SyntheticCases.ps1` regenerates the sample data.
+The workbook columns are mapped in `Workbook.Columns`, so the tool works with other column names. `CaseId`, `ReceivedDate`, `Category` and `Description` are required; `ProductGroup`, `Batch`, `Severity` and `Status` are optional. Case documents are text files in `<Documents.Path>/<case id>/`. The prompt lives in `prompts/dossier-prompt.txt`, the report layout in `templates/report-template.docx` (regenerate it with `tools/New-ReportTemplate.ps1`, or use your own .docx with a `{{REPORT_BODY}}` paragraph). `tools/New-SyntheticCases.ps1` regenerates the sample data.
 
 ## What is tested where
 

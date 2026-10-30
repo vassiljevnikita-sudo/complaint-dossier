@@ -1,10 +1,10 @@
 You are helping a quality assurance reviewer prepare a periodic complaint trend review.
-Your answer is a draft. A qualified person will check every statement before anything is used.
+Your answer is a draft. A trained QA reviewer will check every statement before anything is used.
 
 Rules:
 - Use only the data in this message and in the attached files. Do not invent cases, numbers, causes, products or batches.
 - Use the statistics exactly as given. Do not recalculate them.
-- Cite the case ID in square brackets for every statement about a case, for example [SYN-2026-004].
+- Cite the case ID in square brackets for every statement about a case, for example [SYN-2026-004]. Write batch numbers without brackets.
 - If the data does not support a conclusion, say so in "Data gaps" instead of guessing.
 - Do not state a final root cause, a risk classification or a regulatory conclusion. Suggest checks instead.
 - Write in English, in plain sentences.
@@ -13,7 +13,7 @@ Answer in Markdown with exactly these five sections, in this order:
 ## Summary
 Three to five sentences on the period.
 ## Trends
-Which categories or months stand out, and by how much.
+Which categories, product groups, batches or months stand out, and by how much.
 ## Cases needing attention
 Bullet list. One bullet per case, with the reason.
 ## Suggested follow-up
@@ -34,6 +34,14 @@ Cases by category:
 | Foreign matter | 1 | 10.0 |
 | Tablet appearance | 1 | 10.0 |
 
+Cases by product group:
+| Product group | Count | Share % |
+| --- | --- | --- |
+| Tablets | 5 | 50.0 |
+| Capsules | 2 | 20.0 |
+| Oral solution | 2 | 20.0 |
+| Cream | 1 | 10.0 |
+
 Cases by month:
 | Month | Count |
 | --- | --- |
@@ -44,19 +52,24 @@ Cases by month:
 | 2026-05 | 2 |
 | 2026-06 | 1 |
 
+Batches with more than one case:
+| Batch | Count | Case IDs |
+| --- | --- | --- |
+| SYN-LOT-26A019 | 2 | SYN-2026-009, SYN-2026-010 |
+
 ### Cases
-| Case ID | Received | Category | Product group | Severity | Status | Description |
-| --- | --- | --- | --- | --- | --- | --- |
-| SYN-2026-001 | 2026-01-12 | Packaging damage | Tablets | Minor | Closed | Outer carton dented on one corner. Blister intact, no tablets missing. |
-| SYN-2026-002 | 2026-01-27 | Label or print | Oral solution | Major | Closed | Expiry date on the bottle label partly illegible. Carton print is readable. |
-| SYN-2026-003 | 2026-02-09 | Tablet appearance | Tablets | Minor | Closed | Two tablets in one blister show small dark specks on the surface. |
-| SYN-2026-004 | 2026-03-03 | Packaging damage | Capsules | Minor | Closed | Blister foil torn at one cavity on arrival. Capsule present and intact. |
-| SYN-2026-005 | 2026-03-18 | Dosing device | Oral solution | Major | Open | Measuring cup missing from the carton. |
-| SYN-2026-006 | 2026-04-08 | Packaging damage | Tablets | Minor | Open | Carton crushed in transport. The shipping box was also damaged. |
-| SYN-2026-007 | 2026-04-22 | Foreign matter | Cream | Critical | Open | Customer reports a dark fibre in the cream after first opening of the tube. Sample requested. |
-| SYN-2026-008 | 2026-05-06 | Packaging damage | Capsules | Minor | Open | Two cartons in one shipment dented. Contents not affected. |
-| SYN-2026-009 | 2026-05-20 | Label or print | Tablets | Minor | Open | Patient leaflet missing from the carton. |
-| SYN-2026-010 | 2026-06-02 | Packaging damage | Tablets | Major | Open | Blister strip cracked across two cavities, one tablet broken. Customer asked for a call back on [phone removed]. |
+| Case ID | Received | Category | Product group | Batch | Severity | Status | Description |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SYN-2026-001 | 2026-01-12 | Packaging damage | Tablets | SYN-LOT-25A112 | Minor | Closed | Outer carton dented on one corner. Blister intact, no tablets missing. |
+| SYN-2026-002 | 2026-01-27 | Label or print | Oral solution | SYN-LOT-25B041 | Major | Closed | Expiry date on the bottle label partly illegible. Carton print is readable. |
+| SYN-2026-003 | 2026-02-09 | Tablet appearance | Tablets | SYN-LOT-26A003 | Minor | Closed | Two tablets in one blister show small dark specks on the surface. |
+| SYN-2026-004 | 2026-03-03 | Packaging damage | Capsules | SYN-LOT-25C077 | Minor | Closed | Blister foil torn at one cavity on arrival. Capsule present and intact. |
+| SYN-2026-005 | 2026-03-18 | Dosing device | Oral solution | SYN-LOT-26B006 | Major | Open | Measuring cup missing from the carton. |
+| SYN-2026-006 | 2026-04-08 | Packaging damage | Tablets | SYN-LOT-26A011 | Minor | Open | Carton crushed in transport. The shipping box was also damaged. |
+| SYN-2026-007 | 2026-04-22 | Foreign matter | Cream | SYN-LOT-26D002 | Critical | Open | Customer reports a dark fibre in the cream after first opening of the tube. Sample requested. |
+| SYN-2026-008 | 2026-05-06 | Packaging damage | Capsules | SYN-LOT-26C009 | Minor | Open | Two cartons in one shipment dented. Contents not affected. |
+| SYN-2026-009 | 2026-05-20 | Label or print | Tablets | SYN-LOT-26A019 | Minor | Open | Patient leaflet missing from the carton. |
+| SYN-2026-010 | 2026-06-02 | Packaging damage | Tablets | SYN-LOT-26A019 | Major | Open | Blister strip cracked across two cavities, one tablet broken. Customer asked for a call back on [phone removed]. |
 
 ### Case documents
 --- Document intake-note.txt for case SYN-2026-001 ---
@@ -82,7 +95,7 @@ Customer found a dark fibre, about 3 mm long, on the surface of the cream right 
 SYNTHETIC TEST DATA - generated by tools/New-SyntheticCases.ps1. Invented for demonstration; not a real complaint.
 
 Lab request for SYN-2026-007.
-Requested tests: visual inspection of the returned tube, identification of the fibre (synthetic or natural), comparison with retained samples of the same batch. Status: waiting for the returned sample.
+Requested tests: visual inspection of the returned tube, identification of the fibre (synthetic or natural), comparison with retained samples of the same batch (SYN-LOT-26D002). Status: waiting for the returned sample.
 
 --- Document transport-note.txt for case SYN-2026-008 ---
 SYNTHETIC TEST DATA - generated by tools/New-SyntheticCases.ps1. Invented for demonstration; not a real complaint.

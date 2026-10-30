@@ -16,7 +16,7 @@ BeforeAll {
         $path
     }
     function New-TestCase([string]$Id, [string]$Date, [string]$Category) {
-        [pscustomobject]@{ CaseId = $Id; ReceivedDate = [datetime]$Date; Category = $Category; ProductGroup = ''; Severity = ''; Status = ''; Description = '' }
+        [pscustomobject]@{ CaseId = $Id; ReceivedDate = [datetime]$Date; Category = $Category; ProductGroup = ''; Batch = ''; Severity = ''; Status = ''; Description = '' }
     }
 }
 
@@ -47,6 +47,11 @@ Describe 'Reading cases from the workbook' {
         $cases[0].CaseId | Should -Be 'SYN-2026-001'
         $cases[0].ReceivedDate | Should -Be ([datetime]'2026-01-12')
         $cases[6].Severity | Should -Be 'Critical'
+        $cases[6].ProductGroup | Should -Be 'Cream'
+        $cases[6].Batch | Should -Be 'SYN-LOT-26D002'
+    }
+    It 'uses only batch numbers in the synthetic SYN-LOT- format' {
+        foreach ($case in Import-DossierCases -Config $script:Config) { $case.Batch | Should -Match '^SYN-LOT-\d\d[A-Z]\d{3}$' -Because $case.CaseId }
     }
     It 'keeps the synthetic notice in the first row of the sheet' {
         $rows = Read-XlsxSheet -Path $script:Config.Paths.Workbook -Sheet 'Cases' -HeaderRow 1
@@ -79,6 +84,24 @@ Describe 'Statistics' {
         ($stats.ByMonth | ForEach-Object { "$($_.Month)=$($_.Count)" }) -join ' ' |
             Should -Be '2026-01=2 2026-02=1 2026-03=2 2026-04=2 2026-05=2 2026-06=1'
     }
+    It 'counts by product group and lists batches that occur in more than one case' {
+        $config = Import-DossierConfig -Path $script:ExampleConfig -Root $script:Root
+        $stats = Get-DossierStatistics -Cases (Import-DossierCases -Config $config)
+        ($stats.ByProductGroup | ForEach-Object { "$($_.ProductGroup)=$($_.Count)" }) -join ' ' |
+            Should -Be 'Tablets=5 Capsules=2 Oral solution=2 Cream=1'
+        $stats.ByProductGroup[0].Share | Should -Be 50
+        $stats.CasesWithBatch | Should -Be 10
+        @($stats.SharedBatches).Count | Should -Be 1
+        $stats.SharedBatches[0].Batch | Should -Be 'SYN-LOT-26A019'
+        $stats.SharedBatches[0].CaseIds -join ',' | Should -Be 'SYN-2026-009,SYN-2026-010'
+    }
+    It 'handles cases without product group or batch' {
+        $stats = Get-DossierStatistics -Cases @((New-TestCase 'A-1' '2026-01-05' 'X'), (New-TestCase 'A-2' '2026-01-07' 'X'))
+        $stats.ByProductGroup[0].ProductGroup | Should -Be '(not given)'
+        $stats.CasesWithBatch | Should -Be 0
+        @($stats.SharedBatches).Count | Should -Be 0
+        Get-SharedBatchNote $stats | Should -Be 'No batch numbers in the input.'
+    }
     It 'lists months without cases as 0' {
         $stats = Get-DossierStatistics -Cases @((New-TestCase 'A-1' '2026-01-05' 'X'), (New-TestCase 'A-2' '2026-03-07' 'X'))
         ($stats.ByMonth | ForEach-Object { $_.Count }) -join ',' | Should -Be '1,0,1'
@@ -97,6 +120,10 @@ Describe 'Prompt' {
         $prompt = New-DossierPrompt -Template $script:Template -Cases $script:Cases -Statistics $script:Stats -Documents $script:Docs
         $prompt | Should -Not -Match '\{\{[A-Z_]+\}\}'
         $prompt | Should -Match '\| Packaging damage \| 5 \| 50\.0 \|'
+        $prompt | Should -Match 'Cases by product group:\n\| Product group \| Count \| Share % \|'
+        $prompt | Should -Match '\| Tablets \| 5 \| 50\.0 \|'
+        $prompt | Should -Match '\| SYN-LOT-26A019 \| 2 \| SYN-2026-009, SYN-2026-010 \|'
+        $prompt | Should -Match '\| SYN-2026-007 \| 2026-04-22 \| Foreign matter \| Cream \| SYN-LOT-26D002 \| Critical \|'
         $prompt | Should -Match 'Document lab-request\.txt for case SYN-2026-007'
     }
     It 'masks e-mail addresses and phone numbers by default' {
@@ -148,6 +175,15 @@ Describe 'Demo run, report and approval' {
         foreach ($key in $markers.Keys) { $text | Should -Match ([regex]::Escape($markers[$key])) }
         $text | Should -Match 'Demo: prewritten sample response, Copilot not used'
         $text | Should -Match 'Packaging damage'
+    }
+    It 'shows product groups, shared batches and the batch of every case in the report' {
+        $text = Get-DocxText $script:Result.Report
+        $text | Should -Match 'Cases by product group'
+        $text | Should -Match 'Batches with more than one case'
+        $text | Should -Match 'SYN-2026-009, SYN-2026-010'
+        foreach ($case in Import-DossierCases -Config (Import-DossierConfig -Path $script:ExampleConfig -Root $script:Root)) {
+            $text | Should -Match ([regex]::Escape($case.Batch)) -Because $case.CaseId
+        }
     }
     It 'records SHA-256 hashes that match the files' {
         $script:Audit.schema | Should -Be 'complaint-dossier/audit/v1'

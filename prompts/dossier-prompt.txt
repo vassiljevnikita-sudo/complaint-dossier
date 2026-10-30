@@ -1,10 +1,10 @@
 You are helping a quality assurance reviewer prepare a periodic complaint trend review.
-Your answer is a draft. A qualified person will check every statement before anything is used.
+Your answer is a draft. A trained QA reviewer will check every statement before anything is used.
 
 Rules:
 - Use only the data in this message and in the attached files. Do not invent cases, numbers, causes, products or batches.
 - Use the statistics exactly as given. Do not recalculate them.
-- Cite the case ID in square brackets for every statement about a case, for example [SYN-2026-004].
+- Cite the case ID in square brackets for every statement about a case, for example [SYN-2026-004]. Write batch numbers without brackets.
 - If the data does not support a conclusion, say so in "Data gaps" instead of guessing.
 - Do not state a final root cause, a risk classification or a regulatory conclusion. Suggest checks instead.
 - Write in English, in plain sentences.
@@ -13,7 +13,7 @@ Answer in Markdown with exactly these five sections, in this order:
 ## Summary
 Three to five sentences on the period.
 ## Trends
-Which categories or months stand out, and by how much.
+Which categories, product groups, batches or months stand out, and by how much.
 ## Cases needing attention
 Bullet list. One bullet per case, with the reason.
 ## Suggested follow-up
