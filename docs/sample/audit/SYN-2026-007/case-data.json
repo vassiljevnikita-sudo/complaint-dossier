@@ -1,0 +1,54 @@
+{
+  "caseId": "SYN-2026-007",
+  "reportType": "long",
+  "reportTypeSource": "marker file long.txt",
+  "row": 9,
+  "record": {
+    "CaseId": "SYN-2026-007",
+    "ReceivedDate": "2026-04-22",
+    "Category": "Foreign matter",
+    "Description": "Customer reports a dark fibre in the cream after first opening of the tube. Sample requested.",
+    "Product": "SYN Cream 30 g",
+    "ProductGroup": "Cream",
+    "Batch": "SYN-LOT-26D002",
+    "Severity": "Critical",
+    "Status": "Open",
+    "SampleReceived": "No",
+    "ReportType": ""
+  },
+  "templateFields": {
+    "CaseId": "SYN-2026-007",
+    "ComplaintDate": "22.04.2026",
+    "Product": "SYN Cream 30 g",
+    "ProductGroup": "Cream",
+    "Batch": "SYN-LOT-26D002",
+    "Category": "Foreign matter",
+    "Severity": "Critical",
+    "SampleReceived": "No",
+    "Description": "Customer reports a dark fibre in the cream after first opening of the tube. Sample requested."
+  },
+  "similarComplaints": {
+    "ListSize": 10,
+    "Batch": "SYN-LOT-26D002",
+    "SameBatch": [],
+    "LookbackMonths": 12,
+    "LookbackFrom": "2025-04-23",
+    "LookbackTo": "2026-04-22",
+    "SameProductGroupCategory": [],
+    "RecentDays": 30,
+    "RecentCount": 0,
+    "FrequencyLevel": "rare"
+  },
+  "requiredStatements": [
+    "No complaint sample was available for the investigation."
+  ],
+  "processFacts": [
+    "The batch record was reviewed and showed no findings.",
+    "Retained samples did not need to be checked."
+  ],
+  "documents": [
+    "intake-note.txt",
+    "lab-request.txt"
+  ],
+  "uploads": []
+}

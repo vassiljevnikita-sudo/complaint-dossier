@@ -1,0 +1,156 @@
+{
+  "schema": "complaint-dossier/audit/v4",
+  "tool": {
+    "name": "Complaint Dossier",
+    "version": "0.4.0"
+  },
+  "runId": "20261030T152519Z-335b42",
+  "caseId": "SYN-2026-007",
+  "reportType": "long",
+  "mode": "demo",
+  "status": "DRAFT",
+  "generatedAtUtc": "2026-10-30T15:25:20Z",
+  "summary": {
+    "receivedDate": "2026-04-22",
+    "product": "SYN Cream 30 g",
+    "productGroup": "Cream"
+  },
+  "operator": {
+    "osAccount": "runneradmin",
+    "host": "PowerShell 7.6.7 (Core)"
+  },
+  "model": {
+    "configured": "demo answer written in advance, not Copilot",
+    "copilot": null
+  },
+  "inputs": [
+    {
+      "role": "config",
+      "path": "config.example.json",
+      "sha256": "f8712d4cb8024007dc521172d8a8ece4f1a4b8248e09190f59146301528046c1"
+    },
+    {
+      "role": "complaint-list",
+      "path": "samples/complaint-list.xlsx",
+      "sha256": "a37ca64e8ccf71e7967403bd85b8743f7aa3e786c6c35740c53cc38d7f81e51a"
+    },
+    {
+      "role": "prompt-template",
+      "path": "prompts/long-report.txt",
+      "sha256": "46a87a8a1ba90fb939b4fcfe656295ff19ea720c1ae9ab0f77ce9f3f565b1de7"
+    },
+    {
+      "role": "word-template",
+      "path": "templates/long-report-template.docx",
+      "sha256": "fb98a9bd7c13033e79d113762d2621afad3f77c790476e5878c5e4a63e9a2cf0"
+    },
+    {
+      "role": "case-document",
+      "path": "samples/case-folders/SYN-2026-007/intake-note.txt",
+      "sha256": "f966f611ea968e4897e859f5cc7101349f81184766007b216ea517ac89bfef12"
+    },
+    {
+      "role": "case-document",
+      "path": "samples/case-folders/SYN-2026-007/lab-request.txt",
+      "sha256": "c1e6d58ee0511e20b4d305232a8c2448ee7043a1366e510cc5a2a738de7d4a3f"
+    },
+    {
+      "role": "demo-response",
+      "path": "samples/demo-responses/SYN-2026-007.md",
+      "sha256": "090a3b4390b6d68583ab62a9062291acfa979e866a4fc29ad358433ffd5dcb61"
+    }
+  ],
+  "artifacts": {
+    "caseData": {
+      "file": "audit/SYN-2026-007/case-data.json",
+      "sha256": "84db862872c40eb3fadba6beea985694dc751438f2c886d8c0ebbc68e39e354c"
+    },
+    "prompt": {
+      "file": "audit/SYN-2026-007/prompt.txt",
+      "sha256": "296a35cfa76a8ad98c79f696eff737c6577417496ee68aadc151d0b426d1f6e2"
+    },
+    "response": {
+      "file": "audit/SYN-2026-007/response.md",
+      "sha256": "090a3b4390b6d68583ab62a9062291acfa979e866a4fc29ad358433ffd5dcb61"
+    },
+    "report": {
+      "file": "reports/SYN-2026-007-long-report-DRAFT.docx",
+      "sha256": "855203972dbcf62cc675134e4d3d70790a07d12f1be514b5a254e780eca6969f"
+    }
+  },
+  "checks": [
+    {
+      "id": "not-empty",
+      "name": "Response is not empty",
+      "passed": true,
+      "detail": "2870 characters"
+    },
+    {
+      "id": "not-prompt-copy",
+      "name": "Response is not a copy of the prompt",
+      "passed": true,
+      "detail": ""
+    },
+    {
+      "id": "sections",
+      "name": "Required sections present",
+      "passed": true,
+      "detail": "all present"
+    },
+    {
+      "id": "own-case-id",
+      "name": "Report names its own case ID",
+      "passed": true,
+      "detail": "[SYN-2026-007] cited"
+    },
+    {
+      "id": "cited-ids",
+      "name": "Cited case IDs exist",
+      "passed": true,
+      "detail": "1 case IDs cited, all in the complaint list"
+    },
+    {
+      "id": "statements",
+      "name": "Required statements present",
+      "passed": true,
+      "detail": "present: No complaint sample was available for the investigation."
+    },
+    {
+      "id": "classification",
+      "name": "Conclusion ends with a classification",
+      "passed": true,
+      "detail": "ends with: The complaint is classified as not justified."
+    }
+  ],
+  "review": {
+    "where": "Outside the tool: the reviewer checks the report in Word and finalises it as the QMS requires.",
+    "note": "The report hash above is the generated draft. Edits made during review change the file; that is expected."
+  },
+  "events": [
+    {
+      "atUtc": "2026-10-30T15:25:20Z",
+      "event": "case-started",
+      "detail": "SYN-2026-007, long report (marker file long.txt), mode=demo"
+    },
+    {
+      "atUtc": "2026-10-30T15:25:20Z",
+      "event": "prompt-built",
+      "detail": "9481 characters, 2 document(s), 0 upload(s)"
+    },
+    {
+      "atUtc": "2026-10-30T15:25:20Z",
+      "event": "response-received",
+      "detail": "demo answer copied"
+    },
+    {
+      "atUtc": "2026-10-30T15:25:20Z",
+      "event": "checks-run",
+      "detail": "7 of 7 passed"
+    },
+    {
+      "atUtc": "2026-10-30T15:25:20Z",
+      "event": "report-written",
+      "detail": "reports/SYN-2026-007-long-report-DRAFT.docx"
+    }
+  ]
+}

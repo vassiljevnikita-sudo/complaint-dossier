@@ -113,7 +113,16 @@ The tool reads and writes the .docx parts (document, headers, footers) directly.
 
 ### Live Copilot tests
 
-LIVE_TEST_RESULT_PLACEHOLDER
+Run against the Microsoft 365 Copilot desktop app (German UI) on one Windows 11 computer under Windows PowerShell 5.1, with the model "Quick Response" and synthetic complaints only, on 30 October 2026. Both commands were started the way a QA user starts them, `Setup.cmd -NonInteractive` and then `Run.cmd -From 2026-04-01 -To 2026-04-30`, which selects SYN-2026-006 and SYN-2026-007. They ran in the signed-in Windows session through a scheduled task, while the remote desktop session was disconnected and the Copilot window was not in the foreground.
+
+| Run | Code | What happened |
+| --- | --- | --- |
+| 15:11 to 15:15 UTC | Commit `fa49a19` of pull request #9 | Passed. Setup reported "Ready" with the Copilot app found and the window open. SYN-2026-006 (short report, `shipment-log.csv` uploaded): new temporary chat, model selected and confirmed, prompt typed and read back, answer read through UI Automation, all 6 checks passed. SYN-2026-007 (long report): all 7 checks passed. Copilot sent the numbered headings as list items without their number; each section still landed in its placeholder of the example templates. About 2 minutes per complaint. |
+| 15:16 to 15:22 UTC | Commit `deb27bb` | SYN-2026-006 passed again (6 of 6). For SYN-2026-007 Copilot answered with its daily usage limit message ("Sie haben Ihr Tageslimit erreicht ...") instead of a report. The checks failed 4 of 7, and the run summary named the report. |
+
+The second run led to the last change: an answer with none of the required sections now counts as a failed complaint without a report, so the next `Run.cmd` tries it again, and three such answers in a row stop the run. CI tests this with a prepared answer; it has not run live yet, because the usage limit was still active.
+
+Earlier live tests of the Copilot automation (pull request #8, same day) covered a missing model: the run stopped with "Configured model not found in the Copilot menu" before anything was sent. The tests cover one computer, one app version and one UI language; they are not a validation.
 
 ### Project layout
 

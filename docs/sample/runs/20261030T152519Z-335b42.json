@@ -1,0 +1,34 @@
+{
+  "schema": "complaint-dossier/run/v2",
+  "runId": "20261030T152519Z-335b42",
+  "mode": "demo",
+  "period": {
+    "from": "2026-01-01",
+    "to": "2026-12-31"
+  },
+  "caseIds": [
+    "SYN-2026-006",
+    "SYN-2026-007"
+  ],
+  "stopped": false,
+  "complaints": [
+    {
+      "caseId": "SYN-2026-006",
+      "receivedDate": "2026-04-08",
+      "reportType": "short",
+      "state": "generated",
+      "detail": "",
+      "report": "reports/SYN-2026-006-short-report-DRAFT.docx",
+      "failedChecks": 0
+    },
+    {
+      "caseId": "SYN-2026-007",
+      "receivedDate": "2026-04-22",
+      "reportType": "long",
+      "state": "generated",
+      "detail": "",
+      "report": "reports/SYN-2026-007-long-report-DRAFT.docx",
+      "failedChecks": 0
+    }
+  ]
+}

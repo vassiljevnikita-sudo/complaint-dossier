@@ -1,0 +1,61 @@
+{
+  "caseId": "SYN-2026-006",
+  "reportType": "short",
+  "reportTypeSource": "marker file short.txt",
+  "row": 8,
+  "record": {
+    "CaseId": "SYN-2026-006",
+    "ReceivedDate": "2026-04-08",
+    "Category": "Packaging damage",
+    "Description": "Carton crushed in transport. The shipping box was also damaged.",
+    "Product": "SYN Tablets 50 mg",
+    "ProductGroup": "Tablets",
+    "Batch": "SYN-LOT-26A011",
+    "Severity": "Minor",
+    "Status": "Open",
+    "SampleReceived": "No",
+    "ReportType": ""
+  },
+  "templateFields": {
+    "CaseId": "SYN-2026-006",
+    "ComplaintDate": "08.04.2026",
+    "Product": "SYN Tablets 50 mg",
+    "ProductGroup": "Tablets",
+    "Batch": "SYN-LOT-26A011",
+    "Category": "Packaging damage",
+    "Severity": "Minor",
+    "SampleReceived": "No",
+    "Description": "Carton crushed in transport. The shipping box was also damaged."
+  },
+  "similarComplaints": {
+    "ListSize": 10,
+    "Batch": "SYN-LOT-26A011",
+    "SameBatch": [],
+    "LookbackMonths": 12,
+    "LookbackFrom": "2025-04-09",
+    "LookbackTo": "2026-04-08",
+    "SameProductGroupCategory": [
+      {
+        "CaseId": "SYN-2026-001",
+        "ReceivedDate": "2026-01-12",
+        "Category": "Packaging damage",
+        "ProductGroup": "Tablets",
+        "Batch": "SYN-LOT-25A112",
+        "Status": "Closed"
+      }
+    ],
+    "RecentDays": 30,
+    "RecentCount": 0,
+    "FrequencyLevel": "occasional"
+  },
+  "requiredStatements": [
+    "The reported defect is classified as occasional."
+  ],
+  "processFacts": [
+    "The batch record was reviewed and showed no findings."
+  ],
+  "documents": [
+    "transport-note.txt"
+  ],
+  "uploads": []
+}
