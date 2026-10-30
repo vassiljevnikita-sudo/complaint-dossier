@@ -6,7 +6,7 @@ Complaint Dossier is a prototype. It is designed along GAMP 5 principles, but it
 
 The tool prepares a draft for a periodic complaint trend review, for example as input to a product quality review. A trained QA reviewer reads the draft, checks it against the case records and decides what goes into the official record. The tool does not classify complaints, does not decide on root causes or CAPAs and does not write into any GxP system.
 
-Under this intended use the tool has an indirect GxP impact. Its output influences a quality decision, but a person makes that decision and signs it.
+Under this intended use the tool has an indirect GxP impact. Its output influences a quality decision, but a person makes that decision and approves it.
 
 ## GAMP 5 software categories
 
@@ -25,24 +25,24 @@ The risks below are the ones considered in the design. A real assessment would u
 | Risk | Effect | Control in the tool | Remaining gap |
 | --- | --- | --- | --- |
 | Wrong statistics | Trend under- or overstated | Counts by category, product group and month, and the list of batches with more than one case, are computed by the tool, not by the model. Pester tests check counts, shares and empty months. The prompt tells the model not to recalculate. | Column mapping errors in a real workbook are only caught if a required column is missing. |
-| Model invents cases, numbers or causes | Reviewer reads false statements | The prompt forbids it. An automated check flags cited case IDs that are not in the input. While that check or any other automated check has failed, approval is refused unless the reviewer gives a written justification; the signed report and audit.json then record a documented exception. The report labels the section as AI-drafted. The reviewer must check every statement. | Invented facts without a case ID are not detected automatically. Only the human review catches them. The check results that approval reads sit in audit.json, which is a plain file (see below). |
+| Model invents cases, numbers or causes | Reviewer reads false statements | The prompt forbids it. An automated check flags cited case IDs that are not in the input. While that check or any other automated check has failed, approval is refused unless the reviewer gives a written justification; the approved report and audit.json then record a documented exception. The report labels the section as AI-drafted. The reviewer must check every statement. | Invented facts without a case ID are not detected automatically. Only the human review catches them. The check results that approval reads sit in audit.json, which is a plain file (see below). |
 | Model answer incomplete | Missing sections in the review | Check for the five required sections; result shown in the report and in audit.json. A missing section blocks approval in the same way as an unknown case ID. | A section can exist and still be empty or shallow. |
 | Prompt lands in an old chat or with the wrong model | Context from other conversations, unknown model behaviour | Live mode always opens a new chat. The model comes from the configuration. If the Copilot menu does not offer it, the run stops. It never falls back to another model. | The model name in the menu says nothing about the model version behind it. Microsoft can change it without notice. |
 | UI automation acts on the wrong window or control | Wrong file uploaded, prompt sent elsewhere | The window is found by its title and process tree. The upload helper only accepts a file dialog owned by the Copilot window, and confirms each file as a chat attachment before the prompt is sent. Ambiguous matches stop the run. | UI automation depends on the app version and the UI language. An app update can break it. |
 | Personal data sent to the model | Data protection issue | E-mail addresses and phone numbers are masked by default in case descriptions and in case document text inserted into the prompt. | Masking is not anonymisation. Names, addresses and free-text details pass through. Uploaded attachments are sent unchanged; nothing in them is masked, so they must be reviewed or redacted separately before a live run. |
-| Report changed after review | Signed record differs from what was reviewed | SHA-256 of prompt, response, statistics and draft report are stored at run time. Approval recomputes them and refuses on any mismatch. The signed report is a new file with its own hash. | audit.json is a plain file. Whoever can edit the run folder can rewrite the hashes too. |
-| Reviewer signs without reading | AI text enters the record unchecked | The report says DRAFT in the page header until approval, and the sign-off block names what must be checked. | No tool can prove that someone read a document. This is a training and procedure topic. |
+| Report changed after review | Approved record differs from what was reviewed | SHA-256 of prompt, response, statistics and draft report are stored at run time. Approval recomputes them and refuses on any mismatch. The approved report is a new file with its own hash. | audit.json is a plain file. Whoever can edit the run folder can rewrite the hashes too. |
+| Reviewer approves without reading | AI text enters the record unchecked | The report says DRAFT in the page header until approval, and the approval block names what must be checked. | No tool can prove that someone read a document. This is a training and procedure topic. |
 
 ## Human-in-the-loop control
 
 The design treats the model as a drafting aid and the reviewer as the only decision point.
 
-1. Every run produces a report marked `DRAFT - NOT REVIEWED - NOT FOR USE` in the page header, with status, reviewer and signature fields set to "not signed".
+1. Every run produces a report marked `DRAFT - NOT REVIEWED - NOT FOR USE` in the page header, with status, reviewer and approval time set to "not approved".
 2. The AI-drafted section is labelled as such and states which model was configured (or that demo mode used a prewritten text).
 3. The automated checks are printed in the report, so the reviewer sees what was and was not checked by the tool.
-4. `Approve-ComplaintDossier.ps1` is the only way to remove the DRAFT marking. It needs a reviewer name, verifies the hashes, writes a signed copy, and records reviewer, time, OS account, the hash of the reviewed draft and the hash of the signed report in audit.json. A second approval of the same run is refused.
-5. Approval is refused while any automated check has failed. The error lists the failed checks and the run stays DRAFT. A reviewer who accepts the failures has to pass `-AcceptFailedChecks` with a non-empty `-Justification`. The signed report then carries "APPROVED WITH A DOCUMENTED EXCEPTION" in the page header and prints the accepted checks with the justification; audit.json stores them under `review.exception`.
-6. The draft cannot be edited and then approved. If the reviewer disagrees with the draft, the options are a review comment or a new run. This keeps the signed report identical in content to what the reviewer saw.
+4. `Approve-ComplaintDossier.ps1` is the only way to remove the DRAFT marking. It needs a reviewer name, verifies the hashes, writes an approved copy, and records reviewer, time, OS account, the hash of the reviewed draft and the hash of the approved report in audit.json. The reviewer name is typed, so this approval record is not an electronic signature (see below). A second approval of the same run is refused.
+5. Approval is refused while any automated check has failed. The error lists the failed checks and the run stays DRAFT. A reviewer who accepts the failures has to pass `-AcceptFailedChecks` with a non-empty `-Justification`. The approved report then carries "APPROVED WITH A DOCUMENTED EXCEPTION" in the page header and prints the accepted checks with the justification; audit.json stores them under `review.exception`.
+6. The draft cannot be edited and then approved. If the reviewer disagrees with the draft, the options are a review comment or a new run. This keeps the approved report identical in content to what the reviewer saw.
 
 ## What a company would still need to do
 

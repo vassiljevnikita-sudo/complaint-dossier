@@ -145,7 +145,7 @@ Add-Event 'report-written' $reportName
 # 5. Audit log (SHA-256 hashes)
 $artifact = { param($name) [pscustomobject]@{ file = $name; sha256 = (Get-Sha256 (Join-Path $runPath $name)) } }
 $audit = [pscustomobject][ordered]@{
-    schema    = 'complaint-dossier/audit/v1'
+    schema    = 'complaint-dossier/audit/v2'
     tool      = [pscustomobject]@{ name = 'Complaint Dossier'; version = (Get-DossierVersion) }
     runId     = $runId
     mode      = $mode.ToLowerInvariant()
@@ -161,7 +161,7 @@ $audit = [pscustomobject][ordered]@{
         report     = & $artifact $reportName
     }
     checks    = @($checks | ForEach-Object { [pscustomobject]@{ name = $_.Name; passed = $_.Passed; detail = $_.Detail } })
-    review    = [pscustomobject]@{ reviewer = $null; signedAtUtc = $null; comment = $null }
+    review    = [pscustomobject]@{ reviewer = $null; approvedAtUtc = $null; comment = $null }
     events    = $events.ToArray()
 }
 $auditFile = Join-Path $runPath 'audit.json'
