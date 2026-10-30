@@ -13,7 +13,7 @@ Describe 'Repository' {
     It 'contains no machine-specific absolute paths' {
         # Built from parts so this file does not match itself.
         $pattern = '(?i)\b[A-Z]:\\(' + 'Users|Daten|Data)\\|/(' + 'home|mnt|Users)/[a-z]'
-        $hits = foreach ($file in $script:Files | Where-Object { $_.Extension -in '.ps1', '.psm1', '.json', '.md', '.txt', '.yml' }) {
+        $hits = foreach ($file in $script:Files | Where-Object { $_.Extension -in '.ps1', '.psm1', '.json', '.md', '.txt', '.yml', '.cmd' }) {
             if ((Get-Content -Raw -LiteralPath $file.FullName) -match $pattern) { Get-Relative $file }
         }
         $hits | Should -BeNullOrEmpty
@@ -32,6 +32,16 @@ Describe 'Repository' {
     It 'ships an example configuration without a preselected model' {
         $config = Get-Content -Raw (Join-Path $script:Root 'config.example.json') | ConvertFrom-Json
         $config.Copilot.PreferredModel | Should -Be ''
+    }
+    It 'has every message in English and German' {
+        $messages = Get-Content -Raw -Encoding utf8 (Join-Path $script:Root 'src/messages.json') | ConvertFrom-Json
+        $en = @($messages.en.PSObject.Properties.Name | Sort-Object)
+        $de = @($messages.de.PSObject.Properties.Name | Sort-Object)
+        Compare-Object $en $de | Should -BeNullOrEmpty
+    }
+    It 'starts the two commands through Windows PowerShell with the right scripts' {
+        (Get-Content -Raw (Join-Path $script:Root 'Setup.cmd')) | Should -Match 'powershell\.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Setup\.ps1" %\*'
+        (Get-Content -Raw (Join-Path $script:Root 'Run.cmd')) | Should -Match 'powershell\.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0Invoke-ComplaintDossier\.ps1" %\*'
     }
     It 'keeps local configuration and run output out of git' {
         $ignore = Get-Content (Join-Path $script:Root '.gitignore')

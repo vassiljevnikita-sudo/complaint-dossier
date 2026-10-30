@@ -11,3 +11,4 @@
 # The committed sample run must stay byte for byte as generated, so the
 # hashes in the audit.json files under docs/sample/ keep matching.
 docs/sample/** -text
+*.cmd text eol=crlf
