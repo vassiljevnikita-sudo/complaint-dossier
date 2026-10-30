@@ -182,7 +182,8 @@
     "SetupNotReady": "Not ready yet: {0} thing(s) to fix (marked FIX above). Change config.json, your Excel list or your Word template.",
     "SetupAgain": "Then run Setup.cmd again.",
     "SetupReady": "Ready ({0} warning(s), see WARN above). Start the reports with: Run.cmd",
-    "SetupReadyDemo": "Ready for demo mode ({0} warning(s)). Try it with: Run.cmd -Demo"
+    "SetupReadyDemo": "Ready for demo mode ({0} warning(s)). Try it with: Run.cmd -Demo",
+    "NoReportInAnswer": "Copilot returned no report: the answer has none of the required sections. It begins: \"{0}\". If this is a usage limit, start Run.cmd again later."
   },
   "de": {
     "ConfigMissing": "Einstellungsdatei nicht gefunden: {0}. Zuerst Setup.cmd ausführen, es legt config.json an.",
@@ -367,6 +368,7 @@
     "SetupNotReady": "Noch nicht bereit: {0} Punkt(e) zu beheben (oben mit FIX markiert). config.json, die Excel-Liste oder die Word-Vorlage anpassen.",
     "SetupAgain": "Danach Setup.cmd erneut ausführen.",
     "SetupReady": "Bereit ({0} Warnung(en), siehe WARN oben). Berichte erstellen mit: Run.cmd",
-    "SetupReadyDemo": "Bereit für den Demo-Modus ({0} Warnung(en)). Ausprobieren mit: Run.cmd -Demo"
+    "SetupReadyDemo": "Bereit für den Demo-Modus ({0} Warnung(en)). Ausprobieren mit: Run.cmd -Demo",
+    "NoReportInAnswer": "Copilot hat keinen Bericht geliefert: die Antwort enthält keinen der Pflichtabschnitte. Sie beginnt mit: \"{0}\". Ist das ein Nutzungslimit, Run.cmd später erneut starten."
   }
 }

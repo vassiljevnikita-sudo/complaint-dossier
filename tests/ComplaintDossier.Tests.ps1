@@ -511,6 +511,18 @@ Describe 'Demo run: one draft report per complaint, in the Word template' {
         @(Get-ChildItem (Join-Path $script:Out 'replaced') -Recurse -Filter 'SYN-2026-006-short-report-DRAFT.docx').Count | Should -Be 1
         Join-Path $script:Out 'reports/SYN-2026-006-short-report-DRAFT.docx' | Should -Exist
     }
+    It 'counts an answer without any report section as a failed complaint, so the next run tries it again' {
+        $answers = Join-Path $TestDrive 'limit'
+        New-Item -ItemType Directory -Force -Path $answers | Out-Null
+        Set-Content -LiteralPath (Join-Path $answers 'SYN-2026-006.md') -Value 'You have reached your daily limit. Come back at 1:00 AM.'
+        $config = New-TestConfig { param($c) $c.Demo.ResponsePath = $answers }
+        $result = Invoke-Demo $config @('SYN-2026-006')
+        $LASTEXITCODE | Should -Be 2
+        $result.Complaints[0].state | Should -Be 'failed'
+        $result.Complaints[0].detail | Should -Match 'no report.*It begins: "You have reached your daily limit'
+        Join-Path $result.OutputPath 'reports/SYN-2026-006-short-report-DRAFT.docx' | Should -Not -Exist
+        Join-Path $result.OutputPath 'audit/SYN-2026-006/audit.json' | Should -Not -Exist
+    }
     It 'records a failed complaint, goes on with the others, and stops after three failures in a row' {
         $answers = Join-Path $TestDrive 'answers'
         New-Item -ItemType Directory -Force -Path $answers | Out-Null

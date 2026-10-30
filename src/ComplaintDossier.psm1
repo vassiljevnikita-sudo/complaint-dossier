@@ -1360,6 +1360,15 @@ function New-DossierCaseReport {
     $checks = @(Test-ReportResponse -Response $response -Prompt $prompt -CaseId $case.CaseId -RequiredSections $headings `
             -KnownCaseIds @($AllCases | ForEach-Object { $_.CaseId }) -RequiredStatements $statements `
             -ClassificationStatements @(Get-ConfigList $settings 'ClassificationStatements'))
+    # An answer with none of the required sections is not a report (for example
+    # a usage-limit message). The complaint then fails without a report, so the
+    # next run tries it again, and failures in a row stop the run.
+    $present = @($headings | Where-Object { $response -match ('(?m)^##\s+' + [regex]::Escape($_) + '\s*$') })
+    if ($headings.Count -and -not $present.Count) {
+        $start = (($response -replace '<!--.*?-->', '') -replace '\s+', ' ').Trim()
+        if ($start.Length -gt 120) { $start = $start.Substring(0, 120) + '...' }
+        throw (T 'NoReportInAnswer' -f $start)
+    }
     & $addEvent 'checks-run' "$(@($checks | Where-Object { $_.Passed }).Count) of $($checks.Count) passed"
 
     # 5. Word report from the user's template
