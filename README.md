@@ -2,7 +2,11 @@
 
 A complaint trend review means counting cases, reading case files and writing a summary by hand. Complaint Dossier reads the cases from Excel, computes the statistics, lets Microsoft 365 Copilot draft the assessment and builds a Word report that stays a DRAFT until a named reviewer signs it.
 
-**Kurzfassung (Deutsch):** PowerShell-Werkzeug für die Trendauswertung von Reklamationen. Es liest Fälle aus einer Excel-Datei, berechnet Statistiken, übergibt einen Prompt an die Microsoft 365 Copilot Desktop-App und erzeugt einen Word-Bericht mit Audit-Trail. Der Bericht bleibt ein Entwurf, bis eine prüfende Person ihn freigibt. Ausgelegt nach GAMP-5-Prinzipien, nicht validiert. Alle Beispieldaten sind synthetisch.
+Status: the demo mode is tested in CI on every push. It uses a prewritten answer instead of Copilot. The hand-off to the Copilot desktop app is implemented, but the full live round trip has not been confirmed against the real app yet ([details](#live-copilot-test-30-october-2026)).
+
+[Sample report (PDF)](docs/sample/complaint-dossier-sample-DRAFT.pdf) · [all files of the sample run](docs/sample/) · [Design note: GAMP 5 categories, risks, what validation would still need](docs/design-note.md)
+
+**Kurzfassung (Deutsch):** PowerShell-Werkzeug für die Trendauswertung von Reklamationen. Es liest Fälle aus einer Excel-Datei, berechnet Statistiken, übergibt einen Prompt an die Microsoft 365 Copilot Desktop-App und erzeugt einen Word-Bericht mit Audit-Trail. Der Bericht bleibt ein Entwurf, bis eine prüfende Person ihn freigibt. Der Demo-Modus ist in CI getestet. Die Übergabe an Copilot ist umgesetzt, der vollständige Live-Ablauf mit der echten App ist aber noch nicht bestätigt. Ausgelegt nach GAMP-5-Prinzipien, nicht validiert. Alle Beispieldaten sind synthetisch.
 
 ![Demo run: draft report, approval, audit log](docs/images/demo.gif)
 
@@ -17,22 +21,24 @@ cd complaint-dossier
 ./Approve-ComplaintDossier.ps1 -RunPath out/<run id> -Reviewer 'Your Name'
 ```
 
-The demo uses the 10 synthetic cases in `samples/` and a prewritten answer instead of Copilot. CI runs the same command on every push and keeps the report as a build artifact.
+The demo uses the 10 synthetic cases in `samples/` and a prewritten answer instead of Copilot. CI runs the same command on every push. The output of one such run is committed in [docs/sample/](docs/sample/), so you can read the report without running anything.
 
 ## My role
 
 Complaint Dossier is a public reimplementation of a workflow I first built in my working-student job in pharmaceutical quality assurance. I rebuilt it with synthetic data and a neutral report template. Nothing from the original environment is in this repository.
 
+I wrote the requirements, reviewed and tested the code. The public version was written with an AI coding agent (Claude), which the commits name as co-author.
+
 ## Tech stack
 
-PowerShell 7 and Windows PowerShell 5.1, OpenXML read and written directly (no Office COM), Windows UI Automation for the Microsoft 365 Copilot desktop app, Pester 5, GitHub Actions on `windows-latest`, gitleaks.
+PowerShell 7 or Windows PowerShell 5.1 (the demo runs on either; the live Copilot automation always runs in Windows PowerShell 5.1), OpenXML read and written directly (no Office COM), Windows UI Automation for the Microsoft 365 Copilot desktop app, Pester 5, GitHub Actions on `windows-latest`, gitleaks.
 
 ## Limitations
 
 - A prototype, designed along GAMP 5 principles. It is not validated, and the reviewer name is typed, not an authenticated electronic signature. See [docs/design-note.md](docs/design-note.md).
 - The live Copilot path drives the app's user interface. App updates or another UI language can break it. CI cannot test it, because GitHub runners have no Copilot licence, and the full live round trip has not been confirmed yet. See [What is tested where](#what-is-tested-where).
-- audit.json detects changed files through SHA-256 hashes, but the log itself is an ordinary file without access control.
-- Masking removes e-mail addresses and phone numbers only. It is not anonymisation.
+- audit.json detects changed files through SHA-256 hashes, but the log itself is an ordinary file without access control. Approval reads the results of the automated checks from audit.json, so whoever can edit that file can also hide a failed check.
+- Masking covers case descriptions and the case document text inserted into the prompt, and there it removes only e-mail addresses and phone numbers. Uploaded attachments are sent to Copilot unchanged and must be reviewed or redacted separately. Masking is not anonymisation.
 
 ## How to run
 
@@ -57,7 +63,8 @@ Live mode needs Windows, the Microsoft 365 Copilot desktop app signed in with a 
 1. Copy `config.example.json` to `config.json`. `config.json` is in `.gitignore`.
 2. Point `Workbook`, `Documents` and `Copilot.Upload.Path` at your data. Relative paths resolve against the project folder.
 3. Set `Copilot.PreferredModel` to the model name exactly as the Copilot model menu shows it. If the model sits in a submenu, put the submenu name into `Copilot.PreferredModelGroup`. If the menu does not offer the model, the run stops. It never falls back to another model.
-4. Open the Copilot app, then run:
+4. Check the files in `Copilot.Upload.Path`. Masking covers case descriptions and text inserted into the prompt. Uploaded attachments are sent unchanged, so review or redact them before the run.
+5. Open the Copilot app, then run:
 
 ```powershell
 ./Invoke-ComplaintDossier.ps1 -Live -CaseId SYN-2026-007
@@ -73,6 +80,14 @@ The tool opens a new chat, selects the configured model, attaches every file fro
 
 Approval recomputes the hashes of prompt, response, statistics and draft report and refuses if anything changed after the run. It writes a signed copy without the DRAFT marking, adds reviewer, time and the new hash to `audit.json`, and keeps the draft.
 
+Approval also refuses while any automated check in `audit.json` has failed, for example when the answer cites a case ID that is not in the workbook or misses a required section. It lists the failed checks, and the run stays DRAFT. Usually the right step is a new run. If the reviewer decides the failure is acceptable, they have to say why:
+
+```powershell
+./Approve-ComplaintDossier.ps1 -RunPath out/<run id> -Reviewer 'A. Reviewer' -AcceptFailedChecks -Justification 'SYN-2026-099 is a typo for SYN-2026-009; checked against the case list.'
+```
+
+The justification must not be empty. The signed report then says "APPROVED WITH A DOCUMENTED EXCEPTION" and lists the accepted checks with the justification. `audit.json` stores the same under `review.exception`.
+
 ### Your own data
 
 The workbook columns are mapped in `Workbook.Columns`, so the tool works with other column names. Case documents are text files in `<Documents.Path>/<case id>/`. The prompt lives in `prompts/dossier-prompt.txt`, the report layout in `templates/report-template.docx` (regenerate it with `tools/New-ReportTemplate.ps1`, or use your own .docx with a `{{REPORT_BODY}}` paragraph). `tools/New-SyntheticCases.ps1` regenerates the sample data.
@@ -81,11 +96,12 @@ The workbook columns are mapped in `Workbook.Columns`, so the tool works with ot
 
 | What | Where | How |
 | --- | --- | --- |
-| Excel reading, statistics, prompt, masking, response checks, report, audit hashes, approval and its refusals | CI, `windows-latest`, every push | Pester 5 under PowerShell 7 (`tests/`) |
+| Excel reading, statistics, prompt, masking, response checks, report, audit hashes, approval and its refusals (changed files, failed checks, override without justification) | CI, `windows-latest`, every push | Pester 5 under PowerShell 7 (`tests/`) |
 | Model selection logic, including abort on a missing model or group | CI | Pester with mocked UI elements |
 | Round-trip script aborts cleanly without a model and without a Copilot window | CI | Pester, starts the script in Windows PowerShell 5.1 |
 | Demo run and approval under Windows PowerShell 5.1 | CI | Workflow step |
-| Demo report as a downloadable .docx | CI | Artifact `complaint-dossier-demo` |
+| Demo report as a downloadable .docx | CI | Artifact `complaint-dossier-demo` (needs a GitHub login) |
+| Committed sample in `docs/sample/` still matches what the code produces | CI | Pester compares the report text and the hashes in its audit.json |
 | Employer denylist and secrets over the full history | CI | Denylist from a repository secret, gitleaks |
 | Live Copilot round trip | Manual, see below | Not reproducible in CI |
 
@@ -109,6 +125,7 @@ samples/                        10 synthetic cases, case documents, upload file,
 tools/                          generators for the sample data and the Word template
 tests/                          Pester tests
 docs/design-note.md             GAMP 5 category reasoning, risks, what validation would still need
+docs/sample/                    output of one demo run: DRAFT report (.docx and PDF), audit.json, prompt, answer
 ```
 
 ## License

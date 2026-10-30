@@ -50,6 +50,7 @@ jobs:
             out/demo/audit.json
             out/demo/prompt.txt
             out/demo/response.md
+            out/demo/statistics.json
           retention-days: 7
           if-no-files-found: error
 
@@ -60,7 +61,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Employer denylist (files, Office file contents, full history)
+      - name: Employer denylist (files, Office and PDF file contents, full history)
         env:
           DENYLIST: ${{ secrets.DENYLIST }}
         run: |
@@ -70,12 +71,16 @@ jobs:
           git log -p --all > "$RUNNER_TEMP/history.txt"
           : > "$RUNNER_TEMP/office.txt"
           git ls-files '*.docx' '*.xlsx' | while read -r f; do unzip -p "$f" >> "$RUNNER_TEMP/office.txt"; done
+          if git ls-files '*.pdf' | grep -q .; then
+            command -v pdftotext > /dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils; }
+            git ls-files '*.pdf' | while read -r f; do pdftotext "$f" - >> "$RUNNER_TEMP/office.txt"; done
+          fi
           hits=0
           n=0
           while IFS= read -r term; do
             n=$((n + 1))
             if git grep -I -i -F -q -e "$term"; then echo "term $n: hit in tracked files"; hits=1; fi
-            if grep -i -F -q -e "$term" "$RUNNER_TEMP/office.txt"; then echo "term $n: hit inside .docx/.xlsx"; hits=1; fi
+            if grep -i -F -q -e "$term" "$RUNNER_TEMP/office.txt"; then echo "term $n: hit inside .docx/.xlsx/.pdf"; hits=1; fi
             if grep -i -F -q -e "$term" "$RUNNER_TEMP/history.txt"; then echo "term $n: hit in git history"; hits=1; fi
           done < "$terms"
           echo "Checked $n terms."

@@ -169,7 +169,13 @@ Save-AuditLog $audit $auditFile
 $displayRun = Get-RelativeDisplayPath $root $runPath -FullPathOutside
 Write-Host "[report] $displayRun/$reportName"
 Write-Host "[audit]  $displayRun/audit.json (report sha256 $($audit.artifacts.report.sha256))"
-Write-Host "[next]   status DRAFT. After review: ./Approve-ComplaintDossier.ps1 -RunPath $displayRun -Reviewer 'Your Name'"
+$failedCount = @($checks | Where-Object { -not $_.Passed }).Count
+if ($failedCount) {
+    Write-Host "[next]   status DRAFT. $failedCount automated check(s) failed, so normal approval is refused. Start a new run, or after review accept the failures as a documented exception:"
+    Write-Host "         ./Approve-ComplaintDossier.ps1 -RunPath $displayRun -Reviewer 'Your Name' -AcceptFailedChecks -Justification '<reason>'"
+} else {
+    Write-Host "[next]   status DRAFT. After review: ./Approve-ComplaintDossier.ps1 -RunPath $displayRun -Reviewer 'Your Name'"
+}
 if ($PassThru) {
     [pscustomobject]@{ RunId = $runId; RunPath = $runPath; Report = $reportFile; Audit = $auditFile; Checks = $checks }
 }

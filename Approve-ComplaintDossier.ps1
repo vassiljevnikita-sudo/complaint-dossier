@@ -10,18 +10,34 @@
   If prompt, response, statistics or draft report changed after the run,
   approval is refused.
 
+  Approval is also refused while any automated check of the run has failed.
+  To sign anyway, pass -AcceptFailedChecks and a -Justification. The signed
+  report and audit.json then record the failed checks and the justification
+  as a documented exception.
+
 .EXAMPLE
   ./Approve-ComplaintDossier.ps1 -RunPath out/20261030T101500Z-1a2b3c -Reviewer 'A. Reviewer' -Comment 'Checked against case files.'
+
+.EXAMPLE
+  ./Approve-ComplaintDossier.ps1 -RunPath out/20261030T101500Z-1a2b3c -Reviewer 'A. Reviewer' -AcceptFailedChecks -Justification 'Section "Data gaps" is missing; the gaps are listed in the review comment instead.'
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$RunPath,
     [Parameter(Mandatory)][string]$Reviewer,
-    [string]$Comment = ''
+    [string]$Comment = '',
+    # Sign although automated checks failed. Needs -Justification.
+    [switch]$AcceptFailedChecks,
+    # Why the failed checks are acceptable. Printed in the signed report and stored in audit.json.
+    [string]$Justification = ''
 )
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path (Join-Path $PSScriptRoot 'src') 'ComplaintDossier.psm1') -Force
-$result = Approve-DossierRun -RunPath ($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($RunPath)) -Reviewer $Reviewer -Comment $Comment
+$result = Approve-DossierRun -RunPath ($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($RunPath)) -Reviewer $Reviewer -Comment $Comment `
+    -AcceptFailedChecks:$AcceptFailedChecks -Justification $Justification
 Write-Host "[approved] run $($result.RunId) signed by $Reviewer at $($result.SignedAt)"
+if ($result.Exception) {
+    Write-Host "[exception] $(@($result.Exception.acceptedFailedChecks).Count) failed check(s) accepted. Justification: $($result.Exception.justification)"
+}
 Write-Host "[report]   $(Get-RelativeDisplayPath $PSScriptRoot $result.Report -FullPathOutside)"
 Write-Host "[sha256]   $($result.Sha256)"

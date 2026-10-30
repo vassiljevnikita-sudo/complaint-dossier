@@ -190,10 +190,75 @@ Describe 'Demo run, report and approval' {
         $text | Should -Not -MatchExactly 'DRAFT'
         $text | Should -Match 'Reviewer: R\. Viewer'
         $text | Should -Match 'Status: APPROVED'
+        $text | Should -Match 'Accepted check failures: none \(all automated checks passed\)'
+        $audit.review.exception | Should -BeNullOrEmpty
         Join-Path $script:Run $audit.artifacts.report.file | Should -Exist
     }
     It 'refuses a second approval' {
         { Approve-DossierRun -RunPath $script:Run -Reviewer 'Someone Else' } | Should -Throw '*only DRAFT runs*'
+    }
+}
+
+Describe 'Approval when automated checks failed' {
+    BeforeAll {
+        # Demo run whose response cites a case ID that is not in the workbook.
+        $response = (Read-Utf8File (Join-Path $script:Root 'samples/demo-response.md')) + "`n- Compare with the earlier case [SYN-2026-099].`n"
+        $responsePath = Join-Path $TestDrive 'response-unknown-id.md'
+        Write-Utf8File $responsePath $response
+        $config = New-TestConfig { param($c) $c.Demo.ResponsePath = $responsePath }
+        $script:FailedRun = Join-Path $TestDrive 'failed-run'
+        & (Join-Path $script:Root 'Invoke-ComplaintDossier.ps1') -Demo -ConfigPath $config -OutputPath $script:FailedRun 6> $null
+        function Copy-FailedRun([string]$Name) {
+            $copy = Join-Path $TestDrive $Name
+            Copy-Item -Recurse $script:FailedRun $copy
+            $copy
+        }
+    }
+    It 'records the unknown case ID as a failed check' {
+        $audit = Read-JsonFile (Join-Path $script:FailedRun 'audit.json')
+        $check = $audit.checks | Where-Object name -eq 'Cited case IDs exist'
+        $check.passed | Should -BeFalse
+        $check.detail | Should -Be 'not in the input: SYN-2026-099'
+    }
+    It 'refuses normal approval, names the failed check and leaves the run DRAFT' {
+        $run = Copy-FailedRun 'refused'
+        $before = Get-Content -Raw (Join-Path $run 'audit.json')
+        { Approve-DossierRun -RunPath $run -Reviewer 'R. Viewer' -Comment 'Looks fine.' } |
+            Should -Throw '*Approval refused: 1 automated check(s) failed: Cited case IDs exist (not in the input: SYN-2026-099)*stays DRAFT*'
+        Get-Content -Raw (Join-Path $run 'audit.json') | Should -Be $before
+        (Read-JsonFile (Join-Path $run 'audit.json')).status | Should -Be 'DRAFT'
+        @(Get-ChildItem -LiteralPath $run -Filter *.docx).Count | Should -Be 1
+    }
+    It 'refuses the override without a justification' {
+        $run = Copy-FailedRun 'no-justification'
+        { Approve-DossierRun -RunPath $run -Reviewer 'R. Viewer' -AcceptFailedChecks -Justification '  ' } | Should -Throw '*needs a -Justification*'
+        (Read-JsonFile (Join-Path $run 'audit.json')).status | Should -Be 'DRAFT'
+    }
+    It 'refuses a justification without the override switch' {
+        $run = Copy-FailedRun 'justification-only'
+        { Approve-DossierRun -RunPath $run -Reviewer 'R. Viewer' -Justification 'reason' } | Should -Throw '*only used together with -AcceptFailedChecks*'
+    }
+    It 'refuses the override when all checks passed' {
+        $run = Join-Path $TestDrive 'clean-run'
+        & (Join-Path $script:Root 'Invoke-ComplaintDossier.ps1') -Demo -OutputPath $run 6> $null
+        { Approve-DossierRun -RunPath $run -Reviewer 'R. Viewer' -AcceptFailedChecks -Justification 'reason' } | Should -Throw '*All automated checks passed*'
+        (Read-JsonFile (Join-Path $run 'audit.json')).status | Should -Be 'DRAFT'
+    }
+    It 'records an override with justification in audit.json and in the signed report' {
+        $run = Copy-FailedRun 'override'
+        $reason = 'SYN-2026-099 is a typo for SYN-2026-009; checked against the case list.'
+        & (Join-Path $script:Root 'Approve-ComplaintDossier.ps1') -RunPath $run -Reviewer 'R. Viewer' -AcceptFailedChecks -Justification $reason 6> $null
+        $audit = Read-JsonFile (Join-Path $run 'audit.json')
+        $audit.status | Should -Be 'APPROVED'
+        $audit.review.exception.justification | Should -Be $reason
+        @($audit.review.exception.acceptedFailedChecks).Count | Should -Be 1
+        $audit.review.exception.acceptedFailedChecks[0].name | Should -Be 'Cited case IDs exist'
+        $audit.events[-1].event | Should -Be 'approved-with-exception'
+        $text = Get-DocxText (Join-Path $run $audit.artifacts.approvedReport.file)
+        $text | Should -Match 'APPROVED WITH A DOCUMENTED EXCEPTION by R\. Viewer'
+        $text | Should -Match 'Status: APPROVED with a documented exception'
+        $text | Should -Match ([regex]::Escape("Accepted check failures: DOCUMENTED EXCEPTION. Failed checks: Cited case IDs exist (not in the input: SYN-2026-099). Justification: $reason"))
+        $text | Should -Not -MatchExactly 'DRAFT'
     }
 }
 
