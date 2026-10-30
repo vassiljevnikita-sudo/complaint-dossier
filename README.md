@@ -30,7 +30,7 @@ PowerShell 7 and Windows PowerShell 5.1, OpenXML read and written directly (no O
 ## Limitations
 
 - A prototype, designed along GAMP 5 principles. It is not validated, and the reviewer name is typed, not an authenticated electronic signature. See [docs/design-note.md](docs/design-note.md).
-- The live Copilot path drives the app's user interface. App updates or another UI language can break it. CI cannot test it, because GitHub runners have no Copilot licence. See [What is tested where](#what-is-tested-where).
+- The live Copilot path drives the app's user interface. App updates or another UI language can break it. CI cannot test it, because GitHub runners have no Copilot licence, and the full live round trip has not been confirmed yet. See [What is tested where](#what-is-tested-where).
 - audit.json detects changed files through SHA-256 hashes, but the log itself is an ordinary file without access control.
 - Masking removes e-mail addresses and phone numbers only. It is not anonymisation.
 
@@ -89,7 +89,13 @@ The workbook columns are mapped in `Workbook.Columns`, so the tool works with ot
 | Employer denylist and secrets over the full history | CI | Denylist from a repository secret, gitleaks |
 | Live Copilot round trip | Manual, see below | Not reproducible in CI |
 
-LIVE_TEST_RESULT
+### Live Copilot test (30 October 2026)
+
+Run against the Microsoft 365 Copilot desktop app (package version 19.2610.35011.0, German UI) under Windows PowerShell 5.1, with the synthetic case SYN-2026-007 only. The end-to-end run is not finished yet.
+
+- Passed: the tool found the Copilot window, brought it to the foreground and opened a new chat through UI Automation. Reading the app's controls showed how the model menu names its entries ("Quick Response Answers right away"). The model matching was changed to handle that form, and it now also checks the switcher label after the click.
+- Failed: the first live run stopped at the temporary-chat toggle ("did not switch on"). The tool aborted as designed and sent nothing to Copilot. The state check now looks the button up again after the click, because the app re-renders it.
+- Not run: the Windows desktop session was disconnected before the next attempt, so model selection, file upload, prompt sending and answer capture have not yet been confirmed against the real app. Until they are, treat live mode as untested.
 
 ## Project layout
 
