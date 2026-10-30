@@ -1,30 +1,97 @@
-# Pester 5 tests for the core module and the two entry scripts.
+# Pester 5 tests for the core module, the Word template filling and the two commands.
 # Run: Invoke-Pester ./tests
 
 BeforeAll {
     $script:Root = Split-Path -Parent $PSScriptRoot
     Import-Module (Join-Path (Join-Path $script:Root 'src') 'ComplaintDossier.psm1') -Force
     $script:ExampleConfig = Join-Path $script:Root 'config.example.json'
-    $script:OpenCases = @('SYN-2026-005', 'SYN-2026-006', 'SYN-2026-007', 'SYN-2026-008', 'SYN-2026-009', 'SYN-2026-010')
+    $script:AllCases = @('SYN-2026-001', 'SYN-2026-002', 'SYN-2026-003', 'SYN-2026-004', 'SYN-2026-005', 'SYN-2026-006', 'SYN-2026-007', 'SYN-2026-008', 'SYN-2026-009', 'SYN-2026-010')
+    $script:W = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
 
     function New-TestConfig {
         # Writes a copy of config.example.json with changes applied by $Edit.
-        # Run output and the search for approved reports stay inside TestDrive.
+        # The output folder stays inside TestDrive.
         param([scriptblock]$Edit = {})
         $config = Get-Content -Raw $script:ExampleConfig | ConvertFrom-Json
-        $config.Report.OutputPath = Join-Path $TestDrive ('out-' + [guid]::NewGuid().ToString('N'))
+        $config.Output.Path = Join-Path $TestDrive ('out-' + [guid]::NewGuid().ToString('N'))
+        foreach ($key in 'Workbook', 'CaseFolders', 'Demo') {
+            $value = $config.$key.(@{ Workbook = 'Path'; CaseFolders = 'Path'; Demo = 'ResponsePath' }[$key])
+            $config.$key.(@{ Workbook = 'Path'; CaseFolders = 'Path'; Demo = 'ResponsePath' }[$key]) = Join-Path $script:Root $value
+        }
+        foreach ($type in 'Short', 'Long') {
+            $config.Reports.$type.TemplatePath = Join-Path $script:Root $config.Reports.$type.TemplatePath
+            $config.Reports.$type.PromptPath = Join-Path $script:Root $config.Reports.$type.PromptPath
+        }
         & $Edit $config
         $path = Join-Path $TestDrive ("config-{0}.json" -f [guid]::NewGuid().ToString('N'))
         $config | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $path -Encoding utf8
         $path
     }
     function New-TestCase([string]$Id, [string]$Date, [string]$Category, [string]$Group = 'G', [string]$Batch = '') {
-        [pscustomobject]@{ CaseId = $Id; ReceivedDate = [datetime]$Date; Category = $Category; ProductGroup = $Group; Batch = $Batch; Severity = ''; Status = 'Open'; SampleReceived = ''; Description = '' }
+        [pscustomobject]@{ CaseId = $Id; ReceivedDate = [datetime]$Date; Category = $Category; Product = ''; ProductGroup = $Group; Batch = $Batch; Severity = ''; Status = 'Open'; SampleReceived = ''; Description = ''; ReportType = '' }
     }
-    function Invoke-Demo([string]$Config, [string]$Out, [string[]]$Ids) {
-        $arguments = @{ Demo = $true; ConfigPath = $Config; OutputPath = $Out; PassThru = $true }
+    function Invoke-Demo([string]$Config, [string[]]$Ids, [hashtable]$Extra = @{}) {
+        $arguments = @{ Demo = $true; ConfigPath = $Config; PassThru = $true }
         if ($Ids) { $arguments.CaseId = $Ids }
+        foreach ($k in $Extra.Keys) { $arguments[$k] = $Extra[$k] }
         & (Join-Path $script:Root 'Invoke-ComplaintDossier.ps1') @arguments 6> $null
+    }
+    function New-TestWorkbook([string]$Path, [string[]]$Header, [object[]]$Rows, [string]$Sheet = 'List') {
+        # A small .xlsx with inline strings; [datetime] values become date cells.
+        $cells = { param($r, $values)
+            $out = for ($i = 0; $i -lt $values.Count; $i++) {
+                $ref = ConvertTo-CellReference $i $r
+                $v = $values[$i]
+                if ($null -eq $v) { continue }
+                if ($v -is [datetime]) { "<c r=`"$ref`" s=`"1`"><v>$($v.ToOADate())</v></c>" }
+                else { "<c r=`"$ref`" t=`"inlineStr`"><is><t>$([Security.SecurityElement]::Escape([string]$v))</t></is></c>" }
+            }
+            "<row r=`"$r`">" + ($out -join '') + '</row>'
+        }
+        $rowsXml = (& $cells 1 $Header)
+        $n = 2
+        foreach ($row in $Rows) { $rowsXml += (& $cells $n $row); $n++ }
+        $ns = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+        New-ZipPackage -Path $Path -Parts ([ordered]@{
+                '[Content_Types].xml'        = '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>'
+                '_rels/.rels'                = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>'
+                'xl/workbook.xml'            = "<?xml version=`"1.0`" encoding=`"UTF-8`"?><workbook $ns><sheets><sheet name=`"$Sheet`" sheetId=`"1`" r:id=`"rId1`"/></sheets></workbook>"
+                'xl/_rels/workbook.xml.rels' = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>'
+                'xl/styles.xml'              = '<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/></numFmts><cellXfs count="2"><xf numFmtId="0"/><xf numFmtId="164" applyNumberFormat="1"/></cellXfs></styleSheet>'
+                'xl/worksheets/sheet1.xml'   = "<?xml version=`"1.0`" encoding=`"UTF-8`"?><worksheet $ns><sheetData>$rowsXml</sheetData></worksheet>"
+            })
+        $Path
+    }
+    function New-TestDocx([string]$Path, [string]$Body, [string]$Header = '', [string]$Styles = '', [switch]$Template) {
+        # A minimal Word document. $Body is the XML inside w:body.
+        $main = 'document'
+        if ($Template) { $main = 'template' }
+        $parts = [ordered]@{
+            '[Content_Types].xml' = "<?xml version=`"1.0`" encoding=`"UTF-8`"?><Types xmlns=`"http://schemas.openxmlformats.org/package/2006/content-types`"><Default Extension=`"rels`" ContentType=`"application/vnd.openxmlformats-package.relationships+xml`"/><Default Extension=`"xml`" ContentType=`"application/xml`"/><Override PartName=`"/word/document.xml`" ContentType=`"application/vnd.openxmlformats-officedocument.wordprocessingml.$main.main+xml`"/><Override PartName=`"/docProps/core.xml`" ContentType=`"application/vnd.openxmlformats-package.core-properties+xml`"/></Types>"
+            '_rels/.rels'         = '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'
+            'docProps/core.xml'   = '<?xml version="1.0" encoding="UTF-8"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>t</dc:title></cp:coreProperties>'
+            'word/document.xml'   = "<?xml version=`"1.0`" encoding=`"UTF-8`"?><w:document $script:W><w:body>$Body<w:sectPr/></w:body></w:document>"
+        }
+        if ($Header) { $parts['word/header1.xml'] = "<?xml version=`"1.0`" encoding=`"UTF-8`"?><w:hdr $script:W>$Header</w:hdr>" }
+        if ($Styles) { $parts['word/styles.xml'] = "<?xml version=`"1.0`" encoding=`"UTF-8`"?><w:styles $script:W>$Styles</w:styles>" }
+        New-ZipPackage -Path $Path -Parts $parts
+        $Path
+    }
+    function Get-ZipContentHash([string]$Path) {
+        # Hash of the unpacked entries. The packed bytes differ between the zlib
+        # builds of Windows and Linux, the content does not.
+        $zip = [IO.Compression.ZipFile]::OpenRead($Path)
+        try {
+            $text = @($zip.Entries | Sort-Object FullName | ForEach-Object {
+                    $r = New-Object IO.StreamReader($_.Open())
+                    try { $_.FullName + "`n" + $r.ReadToEnd() } finally { $r.Dispose() }
+                }) -join "`n"
+        } finally { $zip.Dispose() }
+        Get-TextSha256 $text
+    }
+    function Get-DocxPart([string]$Path, [string]$Name) {
+        $zip = [IO.Compression.ZipFile]::OpenRead($Path)
+        try { $reader = New-Object IO.StreamReader($zip.GetEntry($Name).Open()); try { $reader.ReadToEnd() } finally { $reader.Dispose() } } finally { $zip.Dispose() }
     }
 }
 
@@ -32,84 +99,137 @@ Describe 'Configuration' {
     It 'loads config.example.json in demo mode and resolves paths against the project root' {
         $config = Import-DossierConfig -Path $script:ExampleConfig -Root $script:Root -Mode Demo
         $config.Paths.Workbook | Should -Be ([IO.Path]::GetFullPath((Join-Path $script:Root 'samples/complaint-list.xlsx')))
-        $config.Paths.Prompts.Long | Should -Be ([IO.Path]::GetFullPath((Join-Path $script:Root 'prompts/long-report.txt')))
+        $config.Paths.Templates.Long | Should -Be ([IO.Path]::GetFullPath((Join-Path $script:Root 'templates/long-report-template.docx')))
+        $config.Paths.Reports | Should -Be (Join-Path ([IO.Path]::GetFullPath((Join-Path $script:Root 'out'))) 'reports')
     }
     It 'refuses live mode when no model is configured' {
-        { Import-DossierConfig -Path $script:ExampleConfig -Root $script:Root -Mode Live } |
-            Should -Throw '*Copilot.PreferredModel*never picks a model*'
+        { Import-DossierConfig -Path $script:ExampleConfig -Root $script:Root -Mode Live } | Should -Throw '*Copilot.PreferredModel*never picks a model*'
     }
-    It 'reports a missing configuration file with a hint' {
-        { Import-DossierConfig -Path (Join-Path $TestDrive 'nope.json') -Root $script:Root } | Should -Throw '*Copy config.example.json*'
+    It 'points to Setup when the configuration file is missing' {
+        { Import-DossierConfig -Path (Join-Path $TestDrive 'nope.json') -Root $script:Root } | Should -Throw '*Setup.cmd*'
     }
-    It 'fails when a configured prompt does not exist' {
-        $path = New-TestConfig { param($c) $c.Reports.Long.PromptPath = 'prompts/missing.txt' }
-        { Import-DossierConfig -Path $path -Root $script:Root } | Should -Throw '*Reports.Long.PromptPath*'
+    It 'names a missing Word template' {
+        $path = New-TestConfig { param($c) $c.Reports.Long.TemplatePath = 'templates/missing.docx' }
+        { Import-DossierConfig -Path $path -Root $script:Root } | Should -Throw '*missing.docx*'
     }
-    It 'fails when both report types use the same marker' {
-        $path = New-TestConfig { param($c) $c.Reports.Long.Marker = 'short.txt' }
-        { Import-DossierConfig -Path $path -Root $script:Root } | Should -Throw '*must differ*'
+    It 'refuses a .doc template' {
+        $doc = Join-Path $TestDrive 'old.doc'
+        Set-Content -LiteralPath $doc -Value 'x'
+        $path = New-TestConfig { param($c) $c.Reports.Short.TemplatePath = $doc }
+        { Import-DossierConfig -Path $path -Root $script:Root } | Should -Throw '*not a .docx*'
+    }
+    It 'refuses equal markers and placeholder names the tool fills itself' {
+        { Import-DossierConfig -Path (New-TestConfig { param($c) $c.Reports.Long.Marker = 'short.txt' }) -Root $script:Root } | Should -Throw '*different file names*'
+        { Import-DossierConfig -Path (New-TestConfig { param($c) $c.Template.Fields | Add-Member -NotePropertyName CheckSummary -NotePropertyValue 'Batch' }) -Root $script:Root } | Should -Throw '*{{CheckSummary}}*filled by the tool*'
+    }
+    It 'refuses a period that is not a date' {
+        { Import-DossierConfig -Path (New-TestConfig { param($c) $c.Selection.From = '01.01.2026' }) -Root $script:Root } | Should -Throw '*Selection.From*yyyy-MM-dd*'
+    }
+    It 'writes the same JSON bytes on every PowerShell version' {
+        ConvertTo-DossierJson ([ordered]@{ a = 1; b = 'x"y'; c = @(); d = $null; e = $true; f = @('u', 2.5); g = [ordered]@{} }) |
+            Should -Be "{`n  `"a`": 1,`n  `"b`": `"x\`"y`",`n  `"c`": [],`n  `"d`": null,`n  `"e`": true,`n  `"f`": [`n    `"u`",`n    2.5`n  ],`n  `"g`": {}`n}"
     }
 }
 
 Describe 'Reading the complaint list' {
     BeforeAll { $script:Config = Import-DossierConfig -Path $script:ExampleConfig -Root $script:Root }
 
-    It 'reads all 10 synthetic cases without Excel' {
+    It 'reads all 10 synthetic complaints without Excel, through the column names in Workbook.Columns' {
         $cases = @(Import-DossierCases -Config $script:Config)
         $cases.Count | Should -Be 10
         $cases[0].CaseId | Should -Be 'SYN-2026-001'
         $cases[0].ReceivedDate | Should -Be ([datetime]'2026-01-12')
+        $cases[0].ReportType | Should -Be 'short'
         $cases[6].Severity | Should -Be 'Critical'
-        $cases[6].ProductGroup | Should -Be 'Cream'
+        $cases[6].Product | Should -Be 'SYN Cream 30 g'
         $cases[6].Batch | Should -Be 'SYN-LOT-26D002'
-        $cases[6].SampleReceived | Should -Be 'No'
+    }
+    It 'returns date cells as dates' {
+        $cases = @(Import-DossierCases -Config $script:Config)
+        $cases[0].Row.'Date received' | Should -BeOfType [datetime]
     }
     It 'uses only batch numbers in the synthetic SYN-LOT- format' {
-        foreach ($case in Import-DossierCases -Config $script:Config) { $case.Batch | Should -Match '^SYN-LOT-\d\d[A-Z]\d{3}$' -Because $case.CaseId }
+        @(Import-DossierCases -Config $script:Config | Where-Object { $_.Batch -notmatch '^SYN-LOT-\d\d[A-D]\d{3}$' }).Count | Should -Be 0
     }
     It 'keeps the synthetic notice in the first row of the sheet' {
-        $rows = Read-XlsxSheet -Path $script:Config.Paths.Workbook -Sheet 'Complaints' -HeaderRow 1
-        ($rows[0].PSObject.Properties.Name -join ' ') | Should -Match 'SYNTHETIC TEST DATA'
+        $rows = @(Read-XlsxRows -Path $script:Config.Paths.Workbook -Sheet 'Complaints')
+        $rows[0].Values[0] | Should -Match '^SYNTHETIC TEST DATA'
     }
     It 'names the column when the mapping does not match the workbook' {
-        $path = New-TestConfig { param($c) $c.Workbook.Columns.Category = 'Kind' }
-        $config = Import-DossierConfig -Path $path -Root $script:Root
-        { Import-DossierCases -Config $config } | Should -Throw "*Column 'Kind'*"
+        $config = Import-DossierConfig -Path (New-TestConfig { param($c) $c.Workbook.Columns.Batch = 'Lot' }) -Root $script:Root
+        { Import-DossierCases -Config $config } | Should -Throw '*"Lot"*Workbook.Columns.Batch*'
     }
     It 'names the sheet when it does not exist' {
-        $path = New-TestConfig { param($c) $c.Workbook.Sheet = 'Missing' }
-        $config = Import-DossierConfig -Path $path -Root $script:Root
-        { Import-DossierCases -Config $config } | Should -Throw "*'Missing' not found*Complaints, About*"
+        $config = Import-DossierConfig -Path (New-TestConfig { param($c) $c.Workbook.Sheet = 'Nope' }) -Root $script:Root
+        { Import-DossierCases -Config $config } | Should -Throw '*"Nope"*Complaints, About*'
+    }
+    It 'ignores rows without a complaint number or date and lists them' {
+        $xlsx = New-TestWorkbook (Join-Path $TestDrive 'gaps.xlsx') @('No', 'Date', 'Category', 'Text') @(
+            , @('A-1', [datetime]'2026-02-01', 'Leak', 'one')
+            , @($null, [datetime]'2026-02-02', 'Leak', 'no number')
+            , @('A-3', 'sometime', 'Leak', 'bad date')
+            , @('A-4', '05.03.2026', 'Leak', 'text date'))
+        $config = Import-DossierConfig -Path (New-TestConfig { param($c) $c.Workbook.Path = $xlsx; $c.Workbook.Sheet = 'List'; $c.Workbook.HeaderRow = 1
+                $c.Workbook.Columns = [pscustomobject]@{ CaseId = 'No'; ReceivedDate = 'Date'; Category = 'Category'; Description = 'Text' } }) -Root $script:Root
+        $cases = @(Import-DossierCases -Config $config)
+        @($cases | ForEach-Object CaseId) -join ',' | Should -Be 'A-1,A-4'
+        $cases[1].ReceivedDate | Should -Be ([datetime]'2026-03-05')
+        $warnings = & (Get-Module ComplaintDossier) { $script:ImportWarnings }
+        @($warnings).Count | Should -Be 2
+        $warnings[1] | Should -Match 'A-3.*sometime'
+    }
+    It 'refuses duplicate complaint numbers' {
+        $xlsx = New-TestWorkbook (Join-Path $TestDrive 'dup.xlsx') @('No', 'Date') @(
+            , @('A-1', [datetime]'2026-02-01')
+            , @('A-1', [datetime]'2026-02-02'))
+        $config = Import-DossierConfig -Path (New-TestConfig { param($c) $c.Workbook.Path = $xlsx; $c.Workbook.Sheet = 'List'; $c.Workbook.HeaderRow = 1
+                $c.Workbook.Columns = [pscustomobject]@{ CaseId = 'No'; ReceivedDate = 'Date' } }) -Root $script:Root
+        { Import-DossierCases -Config $config } | Should -Throw '*more than once*A-1*'
+    }
+    It 'finds the header row below a title row' {
+        Find-XlsxHeaderRow @(Read-XlsxRows -Path $script:Config.Paths.Workbook -Sheet 'Complaints') | Should -Be 2
     }
 }
 
-Describe 'Case selection' {
+Describe 'Selection' {
     BeforeAll {
         $script:Config = Import-DossierConfig -Path (New-TestConfig) -Root $script:Root
         $script:Cases = @(Import-DossierCases -Config $script:Config)
     }
-    It 'selects all open cases and reads the report type from the marker file' {
+    It 'selects every complaint of the period, with the report type from the marker file or the list column' {
         $selection = @(Select-DossierCases -Config $script:Config -Cases $script:Cases)
-        @($selection | ForEach-Object { $_.Case.CaseId }) -join ',' | Should -Be ($script:OpenCases -join ',')
-        @($selection | Where-Object SkipReason).Count | Should -Be 0
+        @($selection | Where-Object State -eq 'todo').Count | Should -Be 10
+        ($selection | Where-Object { $_.Case.CaseId -eq 'SYN-2026-001' }).Type | Should -Be 'Short'
+        ($selection | Where-Object { $_.Case.CaseId -eq 'SYN-2026-001' }).Reason | Should -Be 'column "Report type"'
         ($selection | Where-Object { $_.Case.CaseId -eq 'SYN-2026-007' }).Type | Should -Be 'Long'
-        ($selection | Where-Object { $_.Case.CaseId -eq 'SYN-2026-006' }).Type | Should -Be 'Short'
+        ($selection | Where-Object { $_.Case.CaseId -eq 'SYN-2026-007' }).Reason | Should -Be 'marker file long.txt'
     }
-    It 'selects a closed case when its ID is given, and skips it without a marker' {
-        $selection = @(Select-DossierCases -Config $script:Config -Cases $script:Cases -CaseId 'SYN-2026-001')
-        $selection.Count | Should -Be 1
-        $selection[0].SkipReason | Should -Match 'no report type marker \(short\.txt or long\.txt\)'
+    It 'narrows to the period and the statuses' {
+        @(Select-DossierCases -Config $script:Config -Cases $script:Cases -From '2026-04-01' -To '2026-04-30' | ForEach-Object { $_.Case.CaseId }) -join ',' | Should -Be 'SYN-2026-006,SYN-2026-007'
+        $open = Import-DossierConfig -Path (New-TestConfig { param($c) $c.Selection.Statuses = @('open') }) -Root $script:Root
+        @(Select-DossierCases -Config $open -Cases $script:Cases).Count | Should -Be 6
     }
-    It 'rejects unknown case IDs' {
-        { Select-DossierCases -Config $script:Config -Cases $script:Cases -CaseId 'SYN-2026-999' } | Should -Throw '*SYN-2026-999*'
+    It 'selects exactly the given complaints and rejects unknown numbers' {
+        @(Select-DossierCases -Config $script:Config -Cases $script:Cases -CaseId 'SYN-2026-003').Count | Should -Be 1
+        { Select-DossierCases -Config $script:Config -Cases $script:Cases -CaseId 'SYN-2099-001' } | Should -Throw '*SYN-2099-001*'
     }
-    It 'skips a case whose folder holds both markers' {
-        $folders = Join-Path $TestDrive 'folders-both'
-        Copy-Item -Recurse (Join-Path $script:Root 'samples/case-folders') $folders
-        Set-Content -LiteralPath (Join-Path $folders 'SYN-2026-006/long.txt') -Value 'SYNTHETIC marker'
-        $config = Import-DossierConfig -Path (New-TestConfig { param($c) $c.CaseFolders.Path = $folders }) -Root $script:Root
-        $item = @(Select-DossierCases -Config $config -Cases $script:Cases -CaseId 'SYN-2026-006')[0]
-        $item.SkipReason | Should -Match 'both short\.txt and long\.txt'
+    It 'skips a complaint whose folder holds both markers, or whose report type value is unknown' {
+        $root = Join-Path $TestDrive 'cases'
+        New-Item -ItemType Directory -Force -Path (Join-Path $root 'SYN-2026-005') | Out-Null
+        'x' | Set-Content (Join-Path $root 'SYN-2026-005/short.txt')
+        'x' | Set-Content (Join-Path $root 'SYN-2026-005/long.txt')
+        $config = Import-DossierConfig -Path (New-TestConfig { param($c) $c.CaseFolders.Path = $root }) -Root $script:Root
+        $cases = @($script:Cases | ForEach-Object { $_.PSObject.Copy() })
+        ($cases | Where-Object CaseId -eq 'SYN-2026-001').ReportType = 'medium'
+        $selection = @(Select-DossierCases -Config $config -Cases $cases)
+        ($selection | Where-Object { $_.Case.CaseId -eq 'SYN-2026-005' }).Reason | Should -Match 'both short.txt and long.txt'
+        ($selection | Where-Object { $_.Case.CaseId -eq 'SYN-2026-001' }).Reason | Should -Match 'unknown report type "medium"'
+        ($selection | Where-Object { $_.Case.CaseId -eq 'SYN-2026-006' }).State | Should -Be 'skip'
+    }
+    It 'uses Reports.DefaultType when neither a marker nor the column decides' {
+        $config = Import-DossierConfig -Path (New-TestConfig { param($c) $c.CaseFolders.Path = ''; $c.Workbook.Columns.ReportType = ''; $c.Reports.DefaultType = 'Long' }) -Root $script:Root
+        $cases = @(Import-DossierCases -Config $config)
+        @(Select-DossierCases -Config $config -Cases $cases | Where-Object Type -eq 'Long').Count | Should -Be 10
     }
 }
 
@@ -254,232 +374,284 @@ Describe 'Response checks' {
     }
 }
 
-Describe 'Demo run: one DRAFT report per open case' {
+
+Describe 'Word template filling' {
+    BeforeAll {
+        $script:Styles = '<w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal"/></w:style><w:style w:type="paragraph" w:styleId="berschrift2"><w:name w:val="heading 2"/></w:style><w:style w:type="paragraph" w:styleId="Aufzhlungszeichen"><w:name w:val="List Bullet"/></w:style>'
+        function Invoke-Fill([string]$Template, [hashtable]$Values = @{}, [hashtable]$Blocks = @{}, [string]$Notice = '', [string]$Appendix = '') {
+            $out = Join-Path $TestDrive ('out-' + [guid]::NewGuid().ToString('N') + '.docx')
+            Invoke-WordTemplate -TemplatePath $Template -OutputPath $out -Values $Values -Blocks $Blocks -Styles @{ Heading = 'heading 2'; Bullet = 'List Bullet' } -Notice $Notice -Appendix $Appendix -ContentStatus 'Draft'
+            $out
+        }
+    }
+    It 'fills a placeholder that Word split over several runs, with the format of its first character' {
+        $body = '<w:p><w:r><w:rPr><w:b/></w:rPr><w:t>Batch: {{Ba</w:t></w:r><w:proofErr w:type="spellStart"/><w:r><w:rPr><w:i/></w:rPr><w:t>tch</w:t></w:r><w:r><w:t>}} end</w:t></w:r></w:p>'
+        $out = Invoke-Fill (New-TestDocx (Join-Path $TestDrive 'split.docx') $body) @{ Batch = 'L-7' }
+        Get-DocxText $out | Should -Be 'Batch: L-7 end'
+        Get-DocxPart $out 'word/document.xml' | Should -Match '<w:r><w:rPr><w:b /></w:rPr><w:t xml:space="preserve">Batch: L-7</w:t></w:r>'
+    }
+    It 'matches names without regard to case and spaces inside the braces' {
+        $out = Invoke-Fill (New-TestDocx (Join-Path $TestDrive 'case.docx') '<w:p><w:r><w:t>{{ batch }} / {{BATCH}}</w:t></w:r></w:p>') @{ Batch = 'L-7' }
+        Get-DocxText $out | Should -Be 'L-7 / L-7'
+    }
+    It 'turns line breaks of a text value into Word line breaks' {
+        $out = Invoke-Fill (New-TestDocx (Join-Path $TestDrive 'br.docx') '<w:p><w:r><w:t>{{Description}}</w:t></w:r></w:p>') @{ Description = "one`ntwo" }
+        Get-DocxPart $out 'word/document.xml' | Should -Match '<w:t xml:space="preserve">one</w:t><w:br /><w:t xml:space="preserve">two</w:t>'
+    }
+    It 'replaces a block placeholder by paragraphs in the template format, with the template list and heading styles' {
+        $body = '<w:p><w:pPr><w:jc w:val="both"/></w:pPr><w:r><w:rPr><w:sz w:val="22"/></w:rPr><w:t>{{Assessment}}</w:t></w:r></w:p>'
+        $out = Invoke-Fill (New-TestDocx (Join-Path $TestDrive 'block.docx') $body -Styles $script:Styles) @{} @{ Assessment = "First **bold** part.`n- item one`n## Sub heading`nLast." }
+        $xml = Get-DocxPart $out 'word/document.xml'
+        Get-DocxText $out | Should -Be "First bold part.`nitem one`nSub heading`nLast."
+        ([regex]::Matches($xml, '<w:jc w:val="both" />')).Count | Should -Be 4
+        $xml | Should -Match '<w:pStyle w:val="Aufzhlungszeichen" />'
+        $xml | Should -Match '<w:pStyle w:val="berschrift2" /><w:jc w:val="both" /></w:pPr><w:r><w:t xml:space="preserve">Sub heading'
+        $xml | Should -Match '<w:rPr><w:b /><w:sz w:val="22" /></w:rPr><w:t xml:space="preserve">bold</w:t>'
+    }
+    It 'writes bullets and bold headings itself when the template lacks the styles' {
+        $out = Invoke-Fill (New-TestDocx (Join-Path $TestDrive 'nostyle.docx') '<w:p><w:r><w:t>{{X}}</w:t></w:r></w:p>') @{} @{ X = "- a`n## H" }
+        Get-DocxText $out | Should -Be ([string][char]0x2022 + " a`nH")
+        Get-DocxPart $out 'word/document.xml' | Should -Match '<w:r><w:rPr><w:b /></w:rPr><w:t xml:space="preserve">H</w:t>'
+    }
+    It 'inserts a block placeholder that shares its paragraph as text with line breaks' {
+        $out = Invoke-Fill (New-TestDocx (Join-Path $TestDrive 'inline.docx') '<w:p><w:r><w:t>Result: {{X}}</w:t></w:r></w:p>') @{} @{ X = "- a`n- b" }
+        Get-DocxText $out | Should -Be ('Result: ' + [char]0x2022 + ' a' + [char]0x2022 + ' b')
+    }
+    It 'fills placeholders in headers, table cells and text boxes, and keeps a section break once' {
+        $body = '<w:tbl><w:tr><w:tc><w:p><w:r><w:t>{{A}}</w:t></w:r></w:p></w:tc></w:tr></w:tbl>' +
+        '<w:p><w:r><w:t>box: </w:t></w:r><w:r><w:pict><w:txbxContent><w:p><w:r><w:t>{{A}}</w:t></w:r></w:p></w:txbxContent></w:pict></w:r></w:p>' +
+        '<w:p><w:pPr><w:sectPr><w:pgSz w:w="1"/></w:sectPr></w:pPr><w:r><w:t>{{X}}</w:t></w:r></w:p>'
+        $out = Invoke-Fill (New-TestDocx (Join-Path $TestDrive 'places.docx') $body -Header '<w:p><w:r><w:t>{{A}}</w:t></w:r></w:p>') @{ A = 'v' } @{ X = "p1`np2" }
+        Get-DocxText $out | Should -Be "v`nbox: v`np1`np2`nv"
+        $xml = Get-DocxPart $out 'word/document.xml'
+        ([regex]::Matches($xml, '<w:pgSz w:w="1" />')).Count | Should -Be 1
+        $xml | Should -Match 'p2</w:t></w:r></w:p>$|<w:sectPr><w:pgSz w:w="1" /></w:sectPr></w:pPr><w:r><w:t xml:space="preserve">p2'
+    }
+    It 'refuses an unknown placeholder and leaves no file behind' {
+        $template = New-TestDocx (Join-Path $TestDrive 'unknown.docx') '<w:p><w:r><w:t>{{Nope}}</w:t></w:r></w:p>'
+        $out = Join-Path $TestDrive 'unknown-out.docx'
+        { Invoke-WordTemplate -TemplatePath $template -OutputPath $out -Values @{} -Blocks @{} } | Should -Throw '*{{Nope}}*'
+        $out | Should -Not -Exist
+    }
+    It 'adds the draft notice and the check results when the template has no place for them, and sets the document status' {
+        $out = Invoke-Fill (New-TestDocx (Join-Path $TestDrive 'plain.docx') '<w:p><w:r><w:t>Body</w:t></w:r></w:p>') @{} @{} 'DRAFT notice' "## Checks`n- passed: x"
+        Get-DocxText $out | Should -Be ("DRAFT notice`nBody`nChecks`n" + [char]0x2022 + ' passed: x')
+        Get-DocxPart $out 'docProps/core.xml' | Should -Match '<cp:contentStatus>Draft</cp:contentStatus>'
+    }
+    It 'turns a .dotx template into a normal document' {
+        $template = New-TestDocx (Join-Path $TestDrive 'tpl.dotx') '<w:p><w:r><w:t>{{A}}</w:t></w:r></w:p>' -Template
+        $out = Invoke-Fill $template @{ A = 'x' }
+        Get-DocxPart $out '[Content_Types].xml' | Should -Match 'wordprocessingml\.document\.main\+xml'
+    }
+    It 'lists the placeholders of a template and whether each stands alone in its paragraph' {
+        $found = @(Get-WordPlaceholders (Join-Path $script:Root 'templates/short-report-template.docx'))
+        ($found | Where-Object Name -eq 'ComplaintDate').Alone | Should -BeTrue
+        ($found | Where-Object Name -eq 'Assessment').Alone | Should -BeTrue
+        @($found | Where-Object { $_.Name -eq 'CaseId' -and $_.Part -eq 'header1' }).Count | Should -Be 1
+    }
+}
+
+Describe 'Demo run: one draft report per complaint, in the Word template' {
     BeforeAll {
         $script:Config = New-TestConfig
-        $script:Run = Join-Path $TestDrive 'run'
-        $script:Result = Invoke-Demo $script:Config $script:Run
-        $script:Report007 = Join-Path $script:Run 'SYN-2026-007/SYN-2026-007-long-report-DRAFT.docx'
-        $script:Audit007 = Read-JsonFile (Join-Path $script:Run 'SYN-2026-007/audit.json')
+        $script:Result = Invoke-Demo $script:Config
+        $script:Out = $script:Result.OutputPath
+        $script:Report007 = Join-Path $script:Out 'reports/SYN-2026-007-long-report-DRAFT.docx'
     }
-    It 'drafts every open case in its own folder, with short or long report from the marker' {
-        @($script:Result.Cases | Where-Object status -eq 'drafted').Count | Should -Be 6
-        foreach ($id in $script:OpenCases) {
-            foreach ($name in 'prompt.txt', 'response.md', 'case-data.json', 'audit.json') { Join-Path $script:Run "$id/$name" | Should -Exist }
-        }
-        Join-Path $script:Run 'SYN-2026-006/SYN-2026-006-short-report-DRAFT.docx' | Should -Exist
-        $script:Report007 | Should -Exist
-        Join-Path $script:Run 'SYN-2026-001' | Should -Not -Exist
-        (Read-JsonFile (Join-Path $script:Run 'run.json')).cases.Count | Should -Be 6
+    It 'generates a report for every complaint of the period, short or long as decided per complaint' {
+        @($script:Result.Complaints | Where-Object state -eq 'generated').Count | Should -Be 10
+        $files = @(Get-ChildItem (Join-Path $script:Out 'reports') -Filter *.docx | ForEach-Object Name | Sort-Object)
+        $files.Count | Should -Be 10
+        $files | Should -Contain 'SYN-2026-001-short-report-DRAFT.docx'
+        $files | Should -Contain 'SYN-2026-010-long-report-DRAFT.docx'
+        @($script:Result.Complaints | Where-Object failedChecks -gt 0).Count | Should -Be 0
     }
-    It 'marks the report as DRAFT in the page header and in the approval block' {
+    It 'fills the template: draft notice in the header, list values, AI sections in their places, checks for the reviewer' {
         $text = Get-DocxText $script:Report007
-        $markers = Get-DossierMarkers
-        foreach ($key in $markers.Keys) { $text | Should -Match ([regex]::Escape($markers[$key])) }
-        $text | Should -Match 'Demo: prewritten sample answer, Copilot not used'
-        $text | Should -Match 'Complaint report \(long\) SYN-2026-007'
+        $text | Should -Match 'DRAFT generated by Complaint Dossier\. Not reviewed\.'
+        $text | Should -Match '(?m)^22\.04\.2026$'
+        $text | Should -Match '(?m)^SYN Cream 30 g$'
+        $text | Should -Match '(?ms)^4\. Examination of the returned complaint sample\nNo complaint sample was available for the investigation\.'
+        $text | Should -Match '(?ms)^9\. Risk assessment and overall conclusion\nA foreign fibre in a cream.*The complaint is classified as not justified\.\nReview and release'
+        $text | Should -Match 'All 7 automated checks passed\.'
+        $text | Should -Match 'Same batch: no other case in the complaint list has batch SYN-LOT-26D002\.'
+        $text | Should -Match 'intake-note\.txt: text inserted into the prompt'
+        $text | Should -Not -Match '\{\{'
+        $text | Should -Not -Match 'SYNTHETIC SAMPLE ANSWER'
     }
-    It 'shows the complaint record, the similar complaints and the case documents of this case only' {
-        $text = Get-DocxText (Join-Path $script:Run 'SYN-2026-010/SYN-2026-010-long-report-DRAFT.docx')
-        $text | Should -Match 'Same batch: 1 other case in the complaint list has batch SYN-LOT-26A019: SYN-2026-009\.'
-        $text | Should -Match 'sample-check\.txt'
-        $text | Should -Match '\[phone removed\]'
-        $text | Should -Not -Match '5550 1234'
-        $text | Should -Not -Match 'SYN-LOT-26D002'
+    It 'marks the document status as draft' {
+        Get-DocxPart $script:Report007 'docProps/core.xml' | Should -Match '<cp:contentStatus>Draft - to be reviewed</cp:contentStatus>'
     }
-    It 'records SHA-256 hashes that match the files' {
-        $script:Audit007.schema | Should -Be 'complaint-dossier/audit/v3'
-        $script:Audit007.caseId | Should -Be 'SYN-2026-007'
-        $script:Audit007.reportType | Should -Be 'long'
-        $script:Audit007.status | Should -Be 'DRAFT'
-        $script:Audit007.review.reviewer | Should -BeNullOrEmpty
+    It 'records SHA-256 hashes that match the files, without any review step' {
+        $audit = Read-JsonFile (Join-Path $script:Out 'audit/SYN-2026-007/audit.json')
+        $audit.status | Should -Be 'DRAFT'
+        $audit.reportType | Should -Be 'long'
         foreach ($name in 'caseData', 'prompt', 'response', 'report') {
-            $artifact = $script:Audit007.artifacts.$name
-            Get-Sha256 (Join-Path $script:Run "SYN-2026-007/$($artifact.file)") | Should -Be $artifact.sha256
+            Get-Sha256 (Join-Path $script:Out $audit.artifacts.$name.file) | Should -Be $audit.artifacts.$name.sha256 -Because $name
         }
-        ($script:Audit007.inputs | Where-Object role -eq 'complaint-list').sha256 | Should -Be (Get-Sha256 (Join-Path $script:Root 'samples/complaint-list.xlsx'))
-        @($script:Audit007.inputs | Where-Object role -eq 'case-document' | ForEach-Object path) -join ',' |
-            Should -Be 'samples/case-folders/SYN-2026-007/intake-note.txt,samples/case-folders/SYN-2026-007/lab-request.txt'
-        ($script:Audit007.inputs | Where-Object role -eq 'demo-response').path | Should -Be 'samples/demo-responses/SYN-2026-007.md'
-        @($script:Audit007.checks | Where-Object { -not $_.passed }).Count | Should -Be 0
-        ($script:Audit007.checks | Where-Object name -eq 'Required statements present').detail | Should -Match 'present: No complaint sample was available for the investigation\.'
-        ($script:Audit007.checks | Where-Object name -eq 'Conclusion ends with a classification').passed | Should -BeTrue
+        @($audit.inputs | ForEach-Object role) | Should -Contain 'word-template'
+        ($audit.inputs | Where-Object role -eq 'word-template').path | Should -Be 'templates/long-report-template.docx'
+        $audit.review.where | Should -Match 'in Word'
+        @($audit.events | ForEach-Object event) -join ',' | Should -Be 'case-started,prompt-built,response-received,checks-run,report-written'
     }
-    It 'logs input paths relative to the project, without user folders' {
-        foreach ($item in $script:Audit007.inputs | Where-Object role -ne 'config') { $item.path | Should -Not -Match '^(/|[A-Za-z]:)' }
+    It 'keeps the case data of each complaint, including the template values' {
+        $data = Read-JsonFile (Join-Path $script:Out 'audit/SYN-2026-001/case-data.json')
+        $data.reportTypeSource | Should -Be 'column "Report type"'
+        $data.templateFields.ComplaintDate | Should -Be '12.01.2026'
+        $data.similarComplaints.FrequencyLevel | Should -Be 'rare'
     }
-    It 'drafts only the given case with -CaseId' {
-        $result = Invoke-Demo $script:Config (Join-Path $TestDrive 'single') @('SYN-2026-009')
-        @($result.Cases).Count | Should -Be 1
-        $result.Cases[0].reportType | Should -Be 'short'
+    It 'skips every complaint with a report on the next run' {
+        $again = Invoke-Demo $script:Config
+        @($again.Complaints | Where-Object state -eq 'generated').Count | Should -Be 0
+        @($again.Complaints | Where-Object state -eq 'done').Count | Should -Be 10
     }
-    It 'records a case as failed and goes on when its demo answer is missing' {
-        $answers = Join-Path $TestDrive 'answers'
-        Copy-Item -Recurse (Join-Path $script:Root 'samples/demo-responses') $answers
-        Remove-Item (Join-Path $answers 'SYN-2026-008.md')
+    It 'generates one report again with -Regenerate and keeps the earlier one under replaced/' {
+        $again = Invoke-Demo $script:Config @('SYN-2026-006') @{ Regenerate = $true }
+        @($again.Complaints | Where-Object state -eq 'generated').Count | Should -Be 1
+        @(Get-ChildItem (Join-Path $script:Out 'replaced') -Recurse -Filter 'SYN-2026-006-short-report-DRAFT.docx').Count | Should -Be 1
+        Join-Path $script:Out 'reports/SYN-2026-006-short-report-DRAFT.docx' | Should -Exist
+    }
+    It 'counts an answer without any report section as a failed complaint, so the next run tries it again' {
+        $answers = Join-Path $TestDrive 'limit'
+        New-Item -ItemType Directory -Force -Path $answers | Out-Null
+        Set-Content -LiteralPath (Join-Path $answers 'SYN-2026-006.md') -Value 'You have reached your daily limit. Come back at 1:00 AM.'
         $config = New-TestConfig { param($c) $c.Demo.ResponsePath = $answers }
-        $result = Invoke-Demo $config (Join-Path $TestDrive 'missing-answer')
+        $result = Invoke-Demo $config @('SYN-2026-006')
         $LASTEXITCODE | Should -Be 2
-        ($result.Cases | Where-Object caseId -eq 'SYN-2026-008').status | Should -Be 'failed'
-        @($result.Cases | Where-Object status -eq 'drafted').Count | Should -Be 5
+        $result.Complaints[0].state | Should -Be 'failed'
+        $result.Complaints[0].detail | Should -Match 'no report.*It begins: "You have reached your daily limit'
+        Join-Path $result.OutputPath 'reports/SYN-2026-006-short-report-DRAFT.docx' | Should -Not -Exist
+        Join-Path $result.OutputPath 'audit/SYN-2026-006/audit.json' | Should -Not -Exist
+    }
+    It 'records a failed complaint, goes on with the others, and stops after three failures in a row' {
+        $answers = Join-Path $TestDrive 'answers'
+        New-Item -ItemType Directory -Force -Path $answers | Out-Null
+        Get-ChildItem (Join-Path $script:Root 'samples/demo-responses') | Where-Object Name -notin 'SYN-2026-002.md', 'SYN-2026-005.md', 'SYN-2026-006.md', 'SYN-2026-007.md' | Copy-Item -Destination $answers
+        $config = New-TestConfig { param($c) $c.Demo.ResponsePath = $answers }
+        $result = Invoke-Demo $config
+        $LASTEXITCODE | Should -Be 2
+        @($result.Complaints | Where-Object state -eq 'generated' | ForEach-Object caseId) -join ',' | Should -Be 'SYN-2026-001,SYN-2026-003,SYN-2026-004'
+        @($result.Complaints | Where-Object state -eq 'failed' | ForEach-Object caseId) -join ',' | Should -Be 'SYN-2026-002,SYN-2026-005,SYN-2026-006,SYN-2026-007'
+        @($result.Complaints | Where-Object state -eq 'not-started').Count | Should -Be 3
+        ($result.Complaints | Where-Object caseId -eq 'SYN-2026-002').detail | Should -Match 'No prewritten demo answer'
+        Join-Path $result.OutputPath 'audit/SYN-2026-002/audit.json' | Should -Not -Exist
     }
 }
 
-Describe 'Approval of one report' {
+Describe 'Review list' {
     BeforeAll {
         $script:Config = New-TestConfig
-        $script:Run = Join-Path ((Get-Content -Raw $script:Config | ConvertFrom-Json).Report.OutputPath) 'run-a'
-        Invoke-Demo $script:Config $script:Run | Out-Null
-        $script:Case = Join-Path $script:Run 'SYN-2026-007'
-        $script:Before = Read-JsonFile (Join-Path $script:Case 'audit.json')
+        $script:Result = Invoke-Demo $script:Config
+        $script:List = $script:Result.ReviewList
     }
-    It 'refuses approval of a run folder and points to the case folders' {
-        { Approve-DossierReport -Path $script:Run -Reviewer 'R. Viewer' } | Should -Throw '*approve each report in its case folder*'
+    It 'lists every generated report with its checks and empty reviewer columns' {
+        $rows = @(Read-XlsxSheet -Path $script:List -Sheet 'Reports')
+        $rows.Count | Should -Be 10
+        $rows[6].'Complaint no.' | Should -Be 'SYN-2026-007'
+        $rows[6].'Report file' | Should -Be 'SYN-2026-007-long-report-DRAFT.docx'
+        $rows[6].'Automated checks' | Should -Be '7 of 7 passed'
+        $rows[6].'Reviewed by' | Should -BeNullOrEmpty
+        @($rows[0].PSObject.Properties.Name) | Should -Contain 'Released (yes/no)'
     }
-    It 'refuses approval when the response changed after the run' {
-        $copy = Join-Path $TestDrive 'tampered'
-        Copy-Item -Recurse $script:Case $copy
-        Add-Content -LiteralPath (Join-Path $copy 'response.md') -Value 'edited later'
-        { Approve-DossierReport -Path $copy -Reviewer 'R. Viewer' } | Should -Throw '*Hash mismatch for response.md*'
-        (Read-JsonFile (Join-Path $copy 'audit.json')).status | Should -Be 'DRAFT'
+    It 'keeps what the QA team entered when the list is written again' {
+        $sheet = Get-DocxPart $script:List 'xl/worksheets/sheet1.xml'
+        $sheet = $sheet.Replace('<row r="8">', '<row r="8"><c r="J8" t="inlineStr"><is><t>A. Reviewer</t></is></c>')
+        $parts = [ordered]@{}
+        $zip = [IO.Compression.ZipFile]::OpenRead($script:List)
+        try { foreach ($e in $zip.Entries) { $r = New-Object IO.StreamReader($e.Open()); $parts[$e.FullName] = $r.ReadToEnd(); $r.Dispose() } } finally { $zip.Dispose() }
+        $parts['xl/worksheets/sheet1.xml'] = $sheet
+        New-ZipPackage -Path $script:List -Parts $parts
+        Invoke-Demo $script:Config @('SYN-2026-006') @{ Regenerate = $true } | Out-Null
+        $rows = @(Read-XlsxSheet -Path $script:List -Sheet 'Reports')
+        ($rows | Where-Object 'Complaint no.' -eq 'SYN-2026-007').'Reviewed by' | Should -Be 'A. Reviewer'
     }
-    It 'refuses approval when the case data changed after the run' {
-        $copy = Join-Path $TestDrive 'tampered-data'
-        Copy-Item -Recurse $script:Case $copy
-        Add-Content -LiteralPath (Join-Path $copy 'case-data.json') -Value ' '
-        { Approve-DossierReport -Path $copy -Reviewer 'R. Viewer' } | Should -Throw '*Hash mismatch for case-data.json*'
+    It 'lists complaints without a report on a second sheet' {
+        $config = New-TestConfig { param($c) $c.Workbook.Columns.ReportType = '' }
+        $result = Invoke-Demo $config
+        $rows = @(Read-XlsxSheet -Path $result.ReviewList -Sheet 'Not generated')
+        @($rows | ForEach-Object 'Complaint no.') -join ',' | Should -Be 'SYN-2026-001,SYN-2026-002,SYN-2026-003,SYN-2026-004'
+        $rows[0].Reason | Should -Match 'no report type'
     }
-    It 'refuses approval without a reviewer name' {
-        { Approve-DossierReport -Path $script:Case -Reviewer ' ' } | Should -Throw '*Reviewer name is required*'
-    }
-    It 'approves one report: removes DRAFT, records reviewer and time, hashes the approved report, leaves the other reports DRAFT' {
-        & (Join-Path $script:Root 'Approve-ComplaintDossier.ps1') -Path $script:Case -Reviewer 'R. Viewer' 6> $null
-        $audit = Read-JsonFile (Join-Path $script:Case 'audit.json')
-        $audit.status | Should -Be 'APPROVED'
-        $audit.review.reviewer | Should -Be 'R. Viewer'
-        $audit.review.approvedAtUtc | Should -Match '^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$'
-        $audit.review.draftSha256 | Should -Be $script:Before.artifacts.report.sha256
-        $audit.events[0].atUtc | Should -Be $script:Before.events[0].atUtc
-        $audit.events[-1].event | Should -Be 'approved'
-        $approved = Join-Path $script:Case $audit.artifacts.approvedReport.file
-        $audit.artifacts.approvedReport.file | Should -Be 'SYN-2026-007-long-report.docx'
-        Get-Sha256 $approved | Should -Be $audit.artifacts.approvedReport.sha256
-        $text = Get-DocxText $approved
-        $text | Should -Not -MatchExactly 'DRAFT'
-        $text | Should -Match 'Approved by: R\. Viewer'
-        $text | Should -Match 'Approved at \(UTC\): \d{4}-'
-        $text | Should -Not -Match '(?i)\b(signed|signs|sign-off)\b'
-        $text | Should -Match 'Status: APPROVED'
-        $text | Should -Match 'Accepted check failures: none \(all automated checks passed\)'
-        $audit.review.exception | Should -BeNullOrEmpty
-        Join-Path $script:Case $audit.artifacts.report.file | Should -Exist
-        (Read-JsonFile (Join-Path $script:Run 'SYN-2026-010/audit.json')).status | Should -Be 'DRAFT'
-    }
-    It 'refuses a second approval' {
-        { Approve-DossierReport -Path $script:Case -Reviewer 'Someone Else' } | Should -Throw '*only DRAFT reports*'
-    }
-    It 'does not draft an approved case again' {
-        $result = Invoke-Demo $script:Config (Join-Path $TestDrive 'after-approval')
-        $item = $result.Cases | Where-Object caseId -eq 'SYN-2026-007'
-        $item.status | Should -Be 'skipped'
-        $item.detail | Should -Match 'approved report already exists'
-        @($result.Cases | Where-Object status -eq 'drafted').Count | Should -Be 5
+    It 'speaks German when Language is de' {
+        $config = New-TestConfig { param($c) $c.Language = 'de' }
+        $result = Invoke-Demo $config @('SYN-2026-007')
+        $rows = @(Read-XlsxSheet -Path $result.ReviewList -Sheet 'Berichte')
+        $rows[0].("Gepr$([char]0xFC)ft von") | Should -BeNullOrEmpty
+        @($rows[0].PSObject.Properties.Name) | Should -Contain "Gepr$([char]0xFC)ft von"
+        @($rows[0].PSObject.Properties.Name) | Should -Contain 'Freigegeben (ja/nein)'
+        Get-DocxText (Join-Path $result.OutputPath 'reports/SYN-2026-007-long-report-DRAFT.docx') | Should -Match 'Alle 7 automatischen Pr.fungen bestanden\.'
+        Set-DossierLanguage en
     }
 }
 
-Describe 'Approval when automated checks failed' {
-    BeforeAll {
-        # Demo run whose answer for SYN-2026-007 cites a case ID that is not in the complaint list.
-        $answers = Join-Path $TestDrive 'answers-bad'
-        Copy-Item -Recurse (Join-Path $script:Root 'samples/demo-responses') $answers
-        $file = Join-Path $answers 'SYN-2026-007.md'
-        Write-Utf8File $file ((Read-Utf8File $file).Replace('In case [SYN-2026-007] a dark fibre', 'In case [SYN-2026-007] (compare [SYN-2026-099]) a dark fibre'))
-        $config = New-TestConfig { param($c) $c.Demo.ResponsePath = $answers }
-        $script:FailedRun = Join-Path $TestDrive 'failed-run'
-        Invoke-Demo $config $script:FailedRun @('SYN-2026-007', 'SYN-2026-006') | Out-Null
-        function Copy-FailedReport([string]$Name) {
-            $copy = Join-Path $TestDrive $Name
-            Copy-Item -Recurse (Join-Path $script:FailedRun 'SYN-2026-007') $copy
-            $copy
-        }
+Describe 'Setup' {
+    It 'reports the example configuration as ready for demo mode' {
+        $output = & pwsh -NoProfile -File (Join-Path $script:Root 'Setup.ps1') -Demo -NonInteractive 2>&1
+        $LASTEXITCODE | Should -Be 0
+        ($output -join "`n") | Should -Match 'Ready for demo mode'
     }
-    It 'records the unknown case ID as a failed check' {
-        $audit = Read-JsonFile (Join-Path $script:FailedRun 'SYN-2026-007/audit.json')
-        $check = $audit.checks | Where-Object name -eq 'Cited case IDs exist'
-        $check.passed | Should -BeFalse
-        $check.detail | Should -Be 'not in the complaint list: SYN-2026-099'
+    It 'names an unknown placeholder, suggests the right one, and a section without a place' {
+        $template = Join-Path $TestDrive 'typo.docx'
+        $body = '<w:p><w:r><w:t>{{Bacth}}</w:t></w:r></w:p><w:p><w:r><w:t>{{BasicData}}</w:t></w:r></w:p>'
+        New-TestDocx $template $body | Out-Null
+        $config = Read-DossierConfig -Path (New-TestConfig { param($c) $c.Reports.Short.TemplatePath = $template }) -Root $script:Root
+        $errors = @(Test-DossierSetup -Config $config | Where-Object Level -eq 'error')
+        ($errors.Text -join "`n") | Should -Match 'Unknown placeholder \{\{Bacth\}\}.*Did you mean "\{\{Batch\}\}"'
+        ($errors.Text -join "`n") | Should -Match 'The AI section "4\. Conclusion" has no place'
     }
-    It 'refuses normal approval, names the failed check and leaves the report DRAFT' {
-        $path = Copy-FailedReport 'refused'
-        $before = Get-Content -Raw (Join-Path $path 'audit.json')
-        { Approve-DossierReport -Path $path -Reviewer 'R. Viewer' -Comment 'Looks fine.' } |
-            Should -Throw '*Approval refused: 1 automated check(s) failed: Cited case IDs exist (not in the complaint list: SYN-2026-099)*stays DRAFT*'
-        Get-Content -Raw (Join-Path $path 'audit.json') | Should -Be $before
-        @(Get-ChildItem -LiteralPath $path -Filter *.docx).Count | Should -Be 1
+    It 'names a column that is missing in the list and suggests the closest one' {
+        $config = Read-DossierConfig -Path (New-TestConfig { param($c) $c.Template.Fields.Batch = 'Batsh' }) -Root $script:Root
+        $errors = @(Test-DossierSetup -Config $config | Where-Object Level -eq 'error')
+        $errors[0].Text | Should -Be 'The list has no column "Batsh" (used for {{Batch}}). Did you mean "Batch"?'
+        $errors[0].Fix | Should -Match 'Template\.Fields\.Batch'
     }
-    It 'still approves the other report of the same run' {
-        Approve-DossierReport -Path (Join-Path $script:FailedRun 'SYN-2026-006') -Reviewer 'R. Viewer' | Out-Null
-        (Read-JsonFile (Join-Path $script:FailedRun 'SYN-2026-006/audit.json')).status | Should -Be 'APPROVED'
-    }
-    It 'refuses the override without a justification' {
-        $path = Copy-FailedReport 'no-justification'
-        { Approve-DossierReport -Path $path -Reviewer 'R. Viewer' -AcceptFailedChecks -Justification '  ' } | Should -Throw '*needs a -Justification*'
-        (Read-JsonFile (Join-Path $path 'audit.json')).status | Should -Be 'DRAFT'
-    }
-    It 'refuses a justification without the override switch' {
-        $path = Copy-FailedReport 'justification-only'
-        { Approve-DossierReport -Path $path -Reviewer 'R. Viewer' -Justification 'reason' } | Should -Throw '*only used together with -AcceptFailedChecks*'
-    }
-    It 'refuses the override when all checks passed' {
-        $run = Join-Path $TestDrive 'clean-run'
-        Invoke-Demo (New-TestConfig) $run @('SYN-2026-005') | Out-Null
-        { Approve-DossierReport -Path (Join-Path $run 'SYN-2026-005') -Reviewer 'R. Viewer' -AcceptFailedChecks -Justification 'reason' } | Should -Throw '*All automated checks passed*'
-    }
-    It 'records an override with justification in audit.json and in the approved report' {
-        $path = Copy-FailedReport 'override'
-        $reason = 'SYN-2026-099 is a typo for SYN-2026-009; checked against the complaint list.'
-        & (Join-Path $script:Root 'Approve-ComplaintDossier.ps1') -Path $path -Reviewer 'R. Viewer' -AcceptFailedChecks -Justification $reason 6> $null
-        $audit = Read-JsonFile (Join-Path $path 'audit.json')
-        $audit.status | Should -Be 'APPROVED'
-        $audit.review.exception.justification | Should -Be $reason
-        @($audit.review.exception.acceptedFailedChecks).Count | Should -Be 1
-        $audit.review.exception.acceptedFailedChecks[0].name | Should -Be 'Cited case IDs exist'
-        $audit.events[-1].event | Should -Be 'approved-with-exception'
-        $text = Get-DocxText (Join-Path $path $audit.artifacts.approvedReport.file)
-        $text | Should -Match 'APPROVED WITH A DOCUMENTED EXCEPTION by R\. Viewer'
-        $text | Should -Match 'Status: APPROVED with a documented exception'
-        $text | Should -Match ([regex]::Escape("Accepted check failures: DOCUMENTED EXCEPTION. Failed checks: Cited case IDs exist (not in the complaint list: SYN-2026-099). Justification: $reason"))
-        $text | Should -Not -MatchExactly 'DRAFT'
+    It 'asks for the columns of an unknown list and writes them into config.json' {
+        $xlsx = New-TestWorkbook (Join-Path $TestDrive 'own-list.xlsx') @('Rek-Nr', 'Eingang', 'Fehlerart', 'Beschreibung', 'Artikel', 'Charge') @(
+            , @('R-1', [datetime]'2026-03-01', 'Leak', 'Bottle leaking', 'Item A', 'C-1'))
+        $configPath = Join-Path $TestDrive 'setup-config.json'
+        $answers = @('en', $xlsx, '',
+            '1', '2', '3', '4', '5', '', '6', '', '', '', '',
+            '1', '2', '5', '', '6', '3', '', '', '4',
+            '', '', '', '', '-', 'Quick Response')
+        & (Join-Path $script:Root 'Setup.ps1') -ConfigPath $configPath -Answers $answers *> $null
+        $saved = Get-Content -Raw $configPath | ConvertFrom-Json
+        $saved.Workbook.Path | Should -Be $xlsx
+        $saved.Workbook.Sheet | Should -Be 'List'
+        $saved.Workbook.HeaderRow | Should -Be 1
+        $saved.Workbook.Columns.CaseId | Should -Be 'Rek-Nr'
+        $saved.Workbook.Columns.Batch | Should -Be 'Charge'
+        $saved.Workbook.Columns.ProductGroup | Should -Be ''
+        $saved.Template.Fields.ComplaintDate | Should -Be 'Eingang'
+        $saved.Template.Fields.Description | Should -Be 'Beschreibung'
+        $saved.CaseFolders.Path | Should -Be ''
+        $saved.Copilot.PreferredModel | Should -Be 'Quick Response'
     }
 }
 
 Describe 'Committed sample in docs/sample' {
     BeforeAll {
         $script:Sample = Join-Path (Join-Path $script:Root 'docs') 'sample'
-        $script:SampleIds = @('SYN-2026-007', 'SYN-2026-006')
-        $script:Fresh = Join-Path $TestDrive 'sample-check'
-        Invoke-Demo (New-TestConfig) $script:Fresh $script:SampleIds | Out-Null
+        $script:Fresh = (Invoke-Demo (New-TestConfig) @('SYN-2026-007', 'SYN-2026-006')).OutputPath
     }
-    It 'holds the main sample PDF that other pages link to' {
+    It 'holds the sample PDFs that other pages link to' {
         Join-Path $script:Sample 'complaint-dossier-sample-DRAFT.pdf' | Should -Exist
-        Join-Path $script:Sample 'SYN-2026-007/SYN-2026-007-long-report-DRAFT.pdf' | Should -Exist
-        Join-Path $script:Sample 'SYN-2026-006/SYN-2026-006-short-report-DRAFT.pdf' | Should -Exist
+        Join-Path $script:Sample 'reports/SYN-2026-007-long-report-DRAFT.pdf' | Should -Exist
+        Join-Path $script:Sample 'reports/SYN-2026-006-short-report-DRAFT.pdf' | Should -Exist
+        Join-Path $script:Sample 'review-list.xlsx' | Should -Exist
     }
-    It 'is an unapproved demo report with all checks passed, matching the hashes in its audit.json (<_>)' -ForEach @('SYN-2026-007', 'SYN-2026-006') {
-        $folder = Join-Path $script:Sample $_
-        $audit = Read-JsonFile (Join-Path $folder 'audit.json')
+    It 'is a demo draft with all checks passed, matching the hashes in its audit.json (<_>)' -ForEach @('SYN-2026-007', 'SYN-2026-006') {
+        $audit = Read-JsonFile (Join-Path $script:Sample "audit/$_/audit.json")
         $audit.mode | Should -Be 'demo'
         $audit.status | Should -Be 'DRAFT'
         @($audit.checks | Where-Object { -not $_.passed }).Count | Should -Be 0
         foreach ($name in 'caseData', 'prompt', 'response', 'report') {
             $artifact = $audit.artifacts.$name
-            Get-Sha256 (Join-Path $folder $artifact.file) | Should -Be $artifact.sha256 -Because $artifact.file
+            Get-Sha256 (Join-Path $script:Sample $artifact.file) | Should -Be $artifact.sha256 -Because $artifact.file
         }
     }
     It 'matches the inputs and the report the current code produces (<_>)' -ForEach @('SYN-2026-007', 'SYN-2026-006') {
-        $folder = Join-Path $script:Sample $_
-        $sample = Read-JsonFile (Join-Path $folder 'audit.json')
-        $fresh = Read-JsonFile (Join-Path (Join-Path $script:Fresh $_) 'audit.json')
+        $sample = Read-JsonFile (Join-Path $script:Sample "audit/$_/audit.json")
+        $fresh = Read-JsonFile (Join-Path $script:Fresh "audit/$_/audit.json")
         foreach ($item in $fresh.inputs | Where-Object role -ne 'config') {
             ($sample.inputs | Where-Object path -eq $item.path).sha256 | Should -Be $item.sha256 -Because $item.path
         }
@@ -489,40 +661,28 @@ Describe 'Committed sample in docs/sample' {
         # Run ID and generation time differ between runs; everything else must match.
         $normalize = {
             param($path, $runId)
-            ((Get-DocxText $path).Replace($runId, '<run id>')) -replace '\d{4}-\d\d-\d\d \d\d:\d\d:\d\d', '<time>'
+            ((Get-DocxText $path).Replace($runId, '<run id>')) -replace '\d\d\.\d\d\.\d{4} \d\d:\d\d', '<time>'
         }
-        $expected = & $normalize (Join-Path $folder $sample.artifacts.report.file) $sample.runId
-        & $normalize (Join-Path (Join-Path $script:Fresh $_) $fresh.artifacts.report.file) $fresh.runId | Should -Be $expected
+        $expected = & $normalize (Join-Path $script:Sample $sample.artifacts.report.file) $sample.runId
+        & $normalize (Join-Path $script:Fresh $fresh.artifacts.report.file) $fresh.runId | Should -Be $expected
     }
 }
 
-Describe 'Report template' {
-    It 'fails when the template has no body anchor' {
-        $template = Join-Path $TestDrive 'bad.docx'
-        New-ZipPackage -Path $template -Parts ([ordered]@{ 'word/document.xml' = '<w:document xmlns:w="w"><w:body><w:p><w:r><w:t>no anchor</w:t></w:r></w:p></w:body></w:document>' })
-        $case = New-TestCase 'A-1' '2026-01-05' 'X'
-        $similar = Get-SimilarComplaints -Case $case -Cases @($case)
-        $run = [pscustomobject]@{ RunId = 'r'; ReportType = 'Short report'; GeneratedAt = 'now'; ModeText = 'm'; Model = 'none'; ResponseNote = 'n'; WorkbookSha256 = 'a'; PromptSha256 = 'b'; ResponseSha256 = 'c' }
-        $out = Join-Path $TestDrive 'out.docx'
-        { New-CaseReport -TemplatePath $template -OutputPath $out -Title 't' -Run $run -Case $case -Similar $similar -Response 'r' -Checks @([pscustomobject]@{ Name = 'c'; Passed = $true; Detail = '' }) } |
-            Should -Throw '*{{REPORT_BODY}}*'
-        $out | Should -Not -Exist
-    }
-}
-
-Describe 'Synthetic data generator' {
-    It 'reproduces the committed complaint list and case folders' {
+Describe 'Generators' {
+    It 'reproduce the committed complaint list, case folders and example templates' {
         $out = Join-Path $TestDrive 'samples'
         & (Join-Path $script:Root 'tools/New-SyntheticCases.ps1') -OutputPath $out 6> $null
-        $config = Import-DossierConfig -Path (New-TestConfig) -Root $script:Root
-        $committed = Import-DossierCases -Config $config | ConvertTo-Json
-        $config.Paths.Workbook = Join-Path $out 'complaint-list.xlsx'
-        Import-DossierCases -Config $config | ConvertTo-Json | Should -Be $committed
+        Get-ZipContentHash (Join-Path $out 'complaint-list.xlsx') | Should -Be (Get-ZipContentHash (Join-Path $script:Root 'samples/complaint-list.xlsx'))
         $committedRoot = Join-Path $script:Root 'samples/case-folders'
         $expected = @(Get-ChildItem -Recurse -File $committedRoot | ForEach-Object { $_.FullName.Substring($committedRoot.Length).Replace('\', '/') + '=' + (Get-Sha256 $_.FullName) } | Sort-Object)
         $generatedRoot = Join-Path $out 'case-folders'
         $actual = @(Get-ChildItem -Recurse -File $generatedRoot | ForEach-Object { $_.FullName.Substring($generatedRoot.Length).Replace('\', '/') + '=' + (Get-Sha256 $_.FullName) } | Sort-Object)
         $actual -join "`n" | Should -Be ($expected -join "`n")
+        $templates = Join-Path $TestDrive 'templates'
+        & (Join-Path $script:Root 'tools/New-ExampleTemplates.ps1') -OutputFolder $templates 6> $null
+        foreach ($name in 'short-report-template.docx', 'long-report-template.docx') {
+            Get-ZipContentHash (Join-Path $templates $name) | Should -Be (Get-ZipContentHash (Join-Path $script:Root "templates/$name")) -Because $name
+        }
     }
 }
 

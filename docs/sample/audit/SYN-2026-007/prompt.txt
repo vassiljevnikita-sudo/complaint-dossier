@@ -110,6 +110,7 @@ Each line of the basic data starts with "• ". Sections 1 to 9 contain only fac
 | Case ID | SYN-2026-007 |
 | Received | 2026-04-22 |
 | Category | Foreign matter |
+| Product | SYN Cream 30 g |
 | Product group | Cream |
 | Batch | SYN-LOT-26D002 |
 | Severity | Critical |

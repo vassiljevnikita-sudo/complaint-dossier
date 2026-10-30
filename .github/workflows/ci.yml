@@ -31,23 +31,37 @@ jobs:
           $config.TestResult.OutputPath = 'testResults.xml'
           Invoke-Pester -Configuration $config
 
-      - name: Demo run, one report per open case (PowerShell 7)
+      - name: Setup check of the example configuration (Windows PowerShell 5.1)
+        if: success() || failure()
+        shell: powershell
+        run: |
+          ./Setup.ps1 -Demo -NonInteractive
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Demo run, every complaint of the period, then a second run that resumes (PowerShell 7)
         # Runs after failed tests too, so the demo reports are available for debugging.
         if: success() || failure()
         shell: pwsh
         run: |
-          ./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo
-          $reports = @(Get-ChildItem out/demo -Recurse -Filter *-DRAFT.docx)
-          if ($reports.Count -ne 6) { throw "Expected 6 DRAFT reports, found $($reports.Count)." }
+          ./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo -NoOpen
+          $reports = @(Get-ChildItem out/demo/reports -Filter *-DRAFT.docx)
+          if ($reports.Count -ne 10) { throw "Expected 10 draft reports, found $($reports.Count)." }
+          $again = ./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo -PassThru
+          if (@($again.Complaints | Where-Object state -eq 'generated').Count) { throw 'The second run generated reports again.' }
           $reports | ForEach-Object { $_.FullName }
 
-      - name: Demo run and approval of one report (Windows PowerShell 5.1)
+      - name: Sample run of two complaints for docs/sample (PowerShell 7)
         if: success() || failure()
-        shell: powershell
+        shell: pwsh
+        run: ./Invoke-ComplaintDossier.ps1 -Demo -CaseId SYN-2026-006,SYN-2026-007 -OutputPath out/sample -NoOpen
+
+      - name: The two commands as a QA user starts them (Setup.cmd and Run.cmd, Windows PowerShell 5.1)
+        if: success() || failure()
+        shell: cmd
         run: |
-          ./Invoke-ComplaintDossier.ps1 -Demo -OutputPath out/demo-ps51
-          if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          ./Approve-ComplaintDossier.ps1 -Path out/demo-ps51/SYN-2026-007 -Reviewer 'CI check' -Comment 'Automated approval test on synthetic data.'
+          call Setup.cmd -Demo -NonInteractive || exit /b 1
+          call Run.cmd -Demo -OutputPath out\demo-cmd -NoOpen || exit /b 1
+          dir /b out\demo-cmd\reports
 
       - name: Upload demo reports
         if: success() || failure()
@@ -55,12 +69,19 @@ jobs:
         with:
           name: complaint-dossier-demo
           path: |
-            out/demo/run.json
-            out/demo/*/*.docx
-            out/demo/*/audit.json
-            out/demo/*/case-data.json
-            out/demo/*/prompt.txt
-            out/demo/*/response.md
+            out/demo/reports/*.docx
+            out/demo/review-list.xlsx
+            out/demo/audit/
+            out/demo/runs/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Upload sample run
+        if: success() || failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: complaint-dossier-sample
+          path: out/sample/
           retention-days: 7
           if-no-files-found: error
 

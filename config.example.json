@@ -1,26 +1,163 @@
 {
+  "_help": "Settings of Complaint Dossier. Setup.cmd copies this file to config.json, asks a few questions and checks the result. Edit config.json, not this file. Paths can be relative to this folder. Every setting is explained in docs/configuration.md.",
+  "Language": "en",
   "Workbook": {
+    "_help": "Your Excel complaint list (.xlsx). Sheet = worksheet name. HeaderRow = row with the column names. Columns = which of your columns holds what; only CaseId and ReceivedDate are required, \"\" = not in your list.",
     "Path": "samples/complaint-list.xlsx",
     "Sheet": "Complaints",
     "HeaderRow": 2,
     "Columns": {
-      "CaseId": "CaseId",
-      "ReceivedDate": "ReceivedDate",
+      "CaseId": "Complaint no.",
+      "ReceivedDate": "Date received",
       "Category": "Category",
-      "ProductGroup": "ProductGroup",
+      "Description": "Description",
+      "Product": "Product",
+      "ProductGroup": "Product group",
       "Batch": "Batch",
       "Severity": "Severity",
       "Status": "Status",
-      "SampleReceived": "SampleReceived",
-      "Description": "Description"
+      "SampleReceived": "Sample received",
+      "ReportType": "Report type"
     }
   },
   "Selection": {
-    "OpenStatuses": [
-      "Open"
-    ]
+    "_help": "Which complaints get a report: received from From to To (yyyy-MM-dd, \"\" = no limit) with one of the Statuses (empty list = any status). A complaint that already has a report is skipped, so you can run again at any time.",
+    "From": "2026-01-01",
+    "To": "2026-12-31",
+    "Statuses": []
+  },
+  "Template": {
+    "_help": "Fields = placeholders in your Word templates that come from the Excel list: placeholder name -> column name. {{CaseId}} in the template becomes the value of the column \"Complaint no.\". DateFormat for date cells, EmptyValue for empty cells. Styles = paragraph styles of your template for headings and list lines in the AI text. Rules: docs/word-template.md",
+    "Fields": {
+      "CaseId": "Complaint no.",
+      "ComplaintDate": "Date received",
+      "Product": "Product",
+      "ProductGroup": "Product group",
+      "Batch": "Batch",
+      "Category": "Category",
+      "Severity": "Severity",
+      "SampleReceived": "Sample received",
+      "Description": "Description"
+    },
+    "DateFormat": "dd.MM.yyyy",
+    "EmptyValue": "n/a",
+    "Styles": {
+      "Heading": "heading 2",
+      "Bullet": "List Bullet"
+    }
+  },
+  "Reports": {
+    "_help": "Short and long report. Which one a complaint gets: an empty file short.txt or long.txt in its case folder, else the column Workbook.Columns.ReportType (values in TypeValues), else DefaultType (\"Short\", \"Long\" or \"\" = skip the complaint). Sections = the headings the AI answer must contain, and the placeholder in your template that receives the text of each section.",
+    "DefaultType": "",
+    "Short": {
+      "Title": "Complaint report (short)",
+      "TemplatePath": "templates/short-report-template.docx",
+      "PromptPath": "prompts/short-report.txt",
+      "Marker": "short.txt",
+      "TypeValues": [
+        "short",
+        "kurz"
+      ],
+      "Sections": [
+        {
+          "Heading": "Basic complaint data",
+          "Placeholder": "BasicData"
+        },
+        {
+          "Heading": "1. Technical description and categorisation of the defect",
+          "Placeholder": "DefectDescription"
+        },
+        {
+          "Heading": "2. Statistical and historical classification",
+          "Placeholder": "History"
+        },
+        {
+          "Heading": "3. Assessment of the available information",
+          "Placeholder": "Assessment"
+        },
+        {
+          "Heading": "4. Conclusion",
+          "Placeholder": "Conclusion"
+        }
+      ],
+      "FrequencyStatement": "The reported defect is classified as {LEVEL}.",
+      "ProcessFacts": [
+        "The batch record was reviewed and showed no findings."
+      ]
+    },
+    "Long": {
+      "Title": "Complaint report (long)",
+      "TemplatePath": "templates/long-report-template.docx",
+      "PromptPath": "prompts/long-report.txt",
+      "Marker": "long.txt",
+      "TypeValues": [
+        "long",
+        "lang"
+      ],
+      "Sections": [
+        {
+          "Heading": "Basic complaint data",
+          "Placeholder": "BasicData"
+        },
+        {
+          "Heading": "1. Technical description and categorisation of the defect",
+          "Placeholder": "DefectDescription"
+        },
+        {
+          "Heading": "2. Previous complaints for the same batch",
+          "Placeholder": "SameBatch"
+        },
+        {
+          "Heading": "3. Previous complaints for the same product",
+          "Placeholder": "SameProduct"
+        },
+        {
+          "Heading": "4. Examination of the returned complaint sample",
+          "Placeholder": "SampleExamination"
+        },
+        {
+          "Heading": "5. Result of the batch record review",
+          "Placeholder": "BatchRecordReview"
+        },
+        {
+          "Heading": "6. Result of the review of analyses and retained samples",
+          "Placeholder": "AnalysesRetainedSamples"
+        },
+        {
+          "Heading": "7. Assessment of a possible manufacturing defect",
+          "Placeholder": "ManufacturingDefect"
+        },
+        {
+          "Heading": "8. Status of existing or initiated corrective actions",
+          "Placeholder": "CorrectiveActions"
+        },
+        {
+          "Heading": "9. Risk assessment and overall conclusion",
+          "Placeholder": "RiskAndConclusion"
+        }
+      ],
+      "NoSampleStatement": "No complaint sample was available for the investigation.",
+      "ProcessFacts": [
+        "The batch record was reviewed and showed no findings.",
+        "Retained samples did not need to be checked."
+      ],
+      "ClassificationStatements": [
+        "The complaint is classified as justified.",
+        "The complaint is classified as not justified."
+      ]
+    }
+  },
+  "Review": {
+    "_help": "Every generated report is a draft. DraftNotice goes into {{DraftNotice}} of your template (or at the top of the report if the template has none). DocumentStatus is written to the Word document property Status. Review and release happen in Word, as your quality system requires.",
+    "DraftNotice": "DRAFT generated by Complaint Dossier. Not reviewed. Check every statement against the case file before use.",
+    "DocumentStatus": "Draft - to be reviewed"
+  },
+  "Output": {
+    "_help": "Folder for the reports (reports/), the review list (review-list.xlsx) and the audit logs (audit/).",
+    "Path": "out"
   },
   "CaseFolders": {
+    "_help": "Optional: one folder per complaint, named like the complaint number. Text files go into the prompt; in live mode the files with Copilot.Upload.Extensions are attached to the chat. \"\" = no case folders.",
     "Path": "samples/case-folders",
     "TextExtensions": [
       ".txt",
@@ -53,58 +190,15 @@
   "Prompt": {
     "MaskContactData": true
   },
-  "Reports": {
-    "Short": {
-      "Marker": "short.txt",
-      "Title": "Complaint report (short)",
-      "PromptPath": "prompts/short-report.txt",
-      "RequiredSections": [
-        "Basic complaint data",
-        "1. Technical description and categorisation of the defect",
-        "2. Statistical and historical classification",
-        "3. Assessment of the available information",
-        "4. Conclusion"
-      ],
-      "FrequencyStatement": "The reported defect is classified as {LEVEL}.",
-      "ProcessFacts": [
-        "The batch record was reviewed and showed no findings."
-      ]
-    },
-    "Long": {
-      "Marker": "long.txt",
-      "Title": "Complaint report (long)",
-      "PromptPath": "prompts/long-report.txt",
-      "RequiredSections": [
-        "Basic complaint data",
-        "1. Technical description and categorisation of the defect",
-        "2. Previous complaints for the same batch",
-        "3. Previous complaints for the same product",
-        "4. Examination of the returned complaint sample",
-        "5. Result of the batch record review",
-        "6. Result of the review of analyses and retained samples",
-        "7. Assessment of a possible manufacturing defect",
-        "8. Status of existing or initiated corrective actions",
-        "9. Risk assessment and overall conclusion"
-      ],
-      "NoSampleStatement": "No complaint sample was available for the investigation.",
-      "ProcessFacts": [
-        "The batch record was reviewed and showed no findings.",
-        "Retained samples did not need to be checked."
-      ],
-      "ClassificationStatements": [
-        "The complaint is classified as justified.",
-        "The complaint is classified as not justified."
-      ]
-    }
-  },
-  "Report": {
-    "TemplatePath": "templates/report-template.docx",
-    "OutputPath": "out"
-  },
   "Demo": {
     "ResponsePath": "samples/demo-responses"
   },
+  "Run": {
+    "_help": "The run stops after this many failed complaints in a row (usually Copilot is then not usable).",
+    "StopAfterFailuresInARow": 3
+  },
   "Copilot": {
+    "_help": "Live mode. PreferredModel: the model name exactly as the Copilot model menu shows it; the run stops if the menu does not offer it. Files in the case folder with these extensions are uploaded unchanged, so review or redact them first.",
     "WindowTitle": "Microsoft 365 Copilot",
     "PreferredModel": "",
     "PreferredModelGroup": "",

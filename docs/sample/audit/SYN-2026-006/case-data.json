@@ -1,14 +1,29 @@
 {
   "caseId": "SYN-2026-006",
   "reportType": "short",
+  "reportTypeSource": "marker file short.txt",
+  "row": 8,
   "record": {
     "CaseId": "SYN-2026-006",
     "ReceivedDate": "2026-04-08",
     "Category": "Packaging damage",
+    "Description": "Carton crushed in transport. The shipping box was also damaged.",
+    "Product": "SYN Tablets 50 mg",
     "ProductGroup": "Tablets",
     "Batch": "SYN-LOT-26A011",
     "Severity": "Minor",
     "Status": "Open",
+    "SampleReceived": "No",
+    "ReportType": ""
+  },
+  "templateFields": {
+    "CaseId": "SYN-2026-006",
+    "ComplaintDate": "08.04.2026",
+    "Product": "SYN Tablets 50 mg",
+    "ProductGroup": "Tablets",
+    "Batch": "SYN-LOT-26A011",
+    "Category": "Packaging damage",
+    "Severity": "Minor",
     "SampleReceived": "No",
     "Description": "Carton crushed in transport. The shipping box was also damaged."
   },

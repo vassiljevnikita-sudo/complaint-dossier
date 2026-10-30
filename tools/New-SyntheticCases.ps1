@@ -6,7 +6,8 @@
   Writes the complaint list samples/complaint-list.xlsx (sheet "Complaints")
   and one case folder per case under samples/case-folders. A case folder
   holds the case documents and, for the open cases, the report type marker
-  (short.txt or long.txt). Batch numbers use the format
+  (short.txt or long.txt). The closed cases get their report type from the
+  column "Report type" of the list instead. Batch numbers use the format
   SYN-LOT-<year><product letter><number>, so they cannot be mistaken for real
   ones. Two cases share one batch on purpose.
   All content is invented. Every file states in its first line that it is
@@ -54,6 +55,9 @@ $documents = @{
     }
 }
 
+# The report type of a case comes from a marker file in its case folder (open
+# cases here) or from the column "Report type" of the list (the closed cases).
+$reportTypes = @{ 'SYN-2026-001' = 'short'; 'SYN-2026-002' = 'short'; 'SYN-2026-003' = 'short'; 'SYN-2026-004' = 'short' }
 # Report type markers for the open cases: the file name decides short or long report.
 $markers = [ordered]@{
     'SYN-2026-005' = 'short.txt'
@@ -84,19 +88,23 @@ if ($Count -gt $scenario.Count) {
 
 # ---- complaint-list.xlsx
 $esc = { param($t) [Security.SecurityElement]::Escape([string]$t) }
-$header = 'CaseId', 'ReceivedDate', 'Category', 'ProductGroup', 'Batch', 'Severity', 'Status', 'SampleReceived', 'Description'
-$letters = 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I'
+# Column names as a complaint list might use them. config.example.json maps them
+# to the tool's fields (Workbook.Columns) and to the template placeholders (Template.Fields).
+$header = 'Complaint no.', 'Date received', 'Category', 'Product group', 'Batch', 'Severity', 'Status', 'Sample received', 'Description', 'Product', 'Report type'
+$letters = 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K'
+$products = @{ 'Tablets' = 'SYN Tablets 50 mg'; 'Oral solution' = 'SYN Oral Solution 100 ml'; 'Capsules' = 'SYN Capsules 20 mg'; 'Cream' = 'SYN Cream 30 g' }
 $rows = New-Object System.Text.StringBuilder
 [void]$rows.Append("<row r=`"1`"><c r=`"A1`" t=`"inlineStr`" s=`"2`"><is><t>$(& $esc $notice)</t></is></c></row>")
-[void]$rows.Append('<row r="2">' + ((0..8 | ForEach-Object { "<c r=`"$($letters[$_])2`" t=`"inlineStr`" s=`"2`"><is><t>$($header[$_])</t></is></c>" }) -join '') + '</row>')
+[void]$rows.Append('<row r="2">' + ((0..10 | ForEach-Object { "<c r=`"$($letters[$_])2`" t=`"inlineStr`" s=`"2`"><is><t>$($header[$_])</t></is></c>" }) -join '') + '</row>')
 $r = 3
 foreach ($case in $cases) {
-    $cells = for ($c = 0; $c -lt 9; $c++) {
+    $values = @($case) + @($products[$case[3]], $reportTypes[$case[0]])
+    $cells = for ($c = 0; $c -lt 11; $c++) {
         if ($c -eq 1) {
             $serial = [DateTime]::ParseExact($case[1], 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture).ToOADate()
             "<c r=`"B$r`" s=`"1`"><v>$serial</v></c>"
         } else {
-            "<c r=`"$($letters[$c])$r`" t=`"inlineStr`"><is><t xml:space=`"preserve`">$(& $esc $case[$c])</t></is></c>"
+            "<c r=`"$($letters[$c])$r`" t=`"inlineStr`"><is><t xml:space=`"preserve`">$(& $esc $values[$c])</t></is></c>"
         }
     }
     [void]$rows.Append("<row r=`"$r`">" + ($cells -join '') + '</row>')
@@ -155,7 +163,7 @@ $parts['xl/styles.xml'] = @'
 '@
 $parts['xl/worksheets/sheet1.xml'] = @"
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet $ns><cols><col min="1" max="1" width="15" customWidth="1"/><col min="2" max="2" width="13" customWidth="1"/><col min="3" max="3" width="19" customWidth="1"/><col min="4" max="4" width="13" customWidth="1"/><col min="5" max="5" width="16" customWidth="1"/><col min="6" max="8" width="14" customWidth="1"/><col min="9" max="9" width="90" customWidth="1"/></cols><sheetData>$($rows.ToString())</sheetData></worksheet>
+<worksheet $ns><cols><col min="1" max="1" width="15" customWidth="1"/><col min="2" max="2" width="13" customWidth="1"/><col min="3" max="3" width="19" customWidth="1"/><col min="4" max="4" width="13" customWidth="1"/><col min="5" max="5" width="16" customWidth="1"/><col min="6" max="8" width="14" customWidth="1"/><col min="9" max="9" width="90" customWidth="1"/><col min="10" max="10" width="24" customWidth="1"/><col min="11" max="11" width="12" customWidth="1"/></cols><sheetData>$($rows.ToString())</sheetData></worksheet>
 "@
 $parts['xl/worksheets/sheet2.xml'] = @"
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>

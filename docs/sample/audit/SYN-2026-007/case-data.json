@@ -1,14 +1,29 @@
 {
   "caseId": "SYN-2026-007",
   "reportType": "long",
+  "reportTypeSource": "marker file long.txt",
+  "row": 9,
   "record": {
     "CaseId": "SYN-2026-007",
     "ReceivedDate": "2026-04-22",
     "Category": "Foreign matter",
+    "Description": "Customer reports a dark fibre in the cream after first opening of the tube. Sample requested.",
+    "Product": "SYN Cream 30 g",
     "ProductGroup": "Cream",
     "Batch": "SYN-LOT-26D002",
     "Severity": "Critical",
     "Status": "Open",
+    "SampleReceived": "No",
+    "ReportType": ""
+  },
+  "templateFields": {
+    "CaseId": "SYN-2026-007",
+    "ComplaintDate": "22.04.2026",
+    "Product": "SYN Cream 30 g",
+    "ProductGroup": "Cream",
+    "Batch": "SYN-LOT-26D002",
+    "Category": "Foreign matter",
+    "Severity": "Critical",
     "SampleReceived": "No",
     "Description": "Customer reports a dark fibre in the cream after first opening of the tube. Sample requested."
   },

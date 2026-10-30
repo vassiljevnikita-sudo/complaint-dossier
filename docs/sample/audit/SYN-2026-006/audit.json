@@ -1,32 +1,38 @@
 {
-  "schema": "complaint-dossier/audit/v3",
+  "schema": "complaint-dossier/audit/v4",
   "tool": {
     "name": "Complaint Dossier",
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
-  "runId": "20261030T115829Z-9196ec",
+  "runId": "20261030T152519Z-335b42",
   "caseId": "SYN-2026-006",
   "reportType": "short",
   "mode": "demo",
   "status": "DRAFT",
+  "generatedAtUtc": "2026-10-30T15:25:20Z",
+  "summary": {
+    "receivedDate": "2026-04-08",
+    "product": "SYN Tablets 50 mg",
+    "productGroup": "Tablets"
+  },
   "operator": {
     "osAccount": "runneradmin",
     "host": "PowerShell 7.6.7 (Core)"
   },
   "model": {
-    "configured": "none (demo mode)",
+    "configured": "demo answer written in advance, not Copilot",
     "copilot": null
   },
   "inputs": [
     {
       "role": "config",
       "path": "config.example.json",
-      "sha256": "4618d85d90dbfef6a262f3d0410dd555f34028258989d9393848c347885527e6"
+      "sha256": "f8712d4cb8024007dc521172d8a8ece4f1a4b8248e09190f59146301528046c1"
     },
     {
       "role": "complaint-list",
       "path": "samples/complaint-list.xlsx",
-      "sha256": "119a5cbc060456529481d78dcdd13122df23b2142533e48f6ee13b7bc2c8ef39"
+      "sha256": "a37ca64e8ccf71e7967403bd85b8743f7aa3e786c6c35740c53cc38d7f81e51a"
     },
     {
       "role": "prompt-template",
@@ -34,9 +40,9 @@
       "sha256": "304c6245138655131c11a831f4282e772cb3fcf2edcf5e123f3db4d6fdae2d2c"
     },
     {
-      "role": "report-template",
-      "path": "templates/report-template.docx",
-      "sha256": "0ba238cd1882159c84df848b86645a32958fdf590d5c8048bdf1f6ab7b8e152e"
+      "role": "word-template",
+      "path": "templates/short-report-template.docx",
+      "sha256": "486ec755125ac90c356912f08a263574d6cc523e811fdd8baffff6b01f4e0079"
     },
     {
       "role": "case-document",
@@ -51,79 +57,89 @@
   ],
   "artifacts": {
     "caseData": {
-      "file": "case-data.json",
-      "sha256": "0dc1004002c3b5078763713e402f65b144ad7f2cc32f778e12d56a26c71033c7"
+      "file": "audit/SYN-2026-006/case-data.json",
+      "sha256": "f04e719920c5793df32270262cade1fc7df3b73ac624568665dcb21e2e35151f"
     },
     "prompt": {
-      "file": "prompt.txt",
-      "sha256": "c5a303034e2c32719bddad833b8556c7a4f9c6c1a6d35525b8a6f2e60da46deb"
+      "file": "audit/SYN-2026-006/prompt.txt",
+      "sha256": "3d67acb343eeb935a3f8da8ff23a518a928e523b8267d6fcb08c51abb9d6b44d"
     },
     "response": {
-      "file": "response.md",
+      "file": "audit/SYN-2026-006/response.md",
       "sha256": "8243a35a265b87b9d250c07979c01c5a6b8271e0e883b53b9f949bd68074307a"
     },
     "report": {
-      "file": "SYN-2026-006-short-report-DRAFT.docx",
-      "sha256": "46c97ac1a236b9c9f1acab00a63b9b7e53595840a2d2308d5d81d3e722a703e3"
+      "file": "reports/SYN-2026-006-short-report-DRAFT.docx",
+      "sha256": "a17500f3036e3b48630c93e6b68eb83af67b749631e9a2952b51999af2bcbc43"
     }
   },
   "checks": [
     {
+      "id": "not-empty",
       "name": "Response is not empty",
       "passed": true,
       "detail": "1726 characters"
     },
     {
+      "id": "not-prompt-copy",
       "name": "Response is not a copy of the prompt",
       "passed": true,
       "detail": ""
     },
     {
+      "id": "sections",
       "name": "Required sections present",
       "passed": true,
       "detail": "all present"
     },
     {
+      "id": "own-case-id",
       "name": "Report names its own case ID",
       "passed": true,
       "detail": "[SYN-2026-006] cited"
     },
     {
+      "id": "cited-ids",
       "name": "Cited case IDs exist",
       "passed": true,
       "detail": "2 case IDs cited, all in the complaint list"
     },
     {
+      "id": "statements",
       "name": "Required statements present",
       "passed": true,
       "detail": "present: The reported defect is classified as occasional."
     }
   ],
   "review": {
-    "reviewer": null,
-    "approvedAtUtc": null,
-    "comment": null
+    "where": "Outside the tool: the reviewer checks the report in Word and finalises it as the QMS requires.",
+    "note": "The report hash above is the generated draft. Edits made during review change the file; that is expected."
   },
   "events": [
     {
-      "atUtc": "2026-10-30T11:58:29Z",
+      "atUtc": "2026-10-30T15:25:19Z",
       "event": "case-started",
-      "detail": "SYN-2026-006, short report, mode=demo"
+      "detail": "SYN-2026-006, short report (marker file short.txt), mode=demo"
     },
     {
-      "atUtc": "2026-10-30T11:58:29Z",
+      "atUtc": "2026-10-30T15:25:19Z",
       "event": "prompt-built",
-      "detail": "4702 characters, 1 document(s), 0 upload(s)"
+      "detail": "4734 characters, 1 document(s), 0 upload(s)"
     },
     {
-      "atUtc": "2026-10-30T11:58:29Z",
+      "atUtc": "2026-10-30T15:25:19Z",
       "event": "response-received",
       "detail": "demo answer copied"
     },
     {
-      "atUtc": "2026-10-30T11:58:29Z",
+      "atUtc": "2026-10-30T15:25:19Z",
+      "event": "checks-run",
+      "detail": "6 of 6 passed"
+    },
+    {
+      "atUtc": "2026-10-30T15:25:20Z",
       "event": "report-written",
-      "detail": "SYN-2026-006-short-report-DRAFT.docx"
+      "detail": "reports/SYN-2026-006-short-report-DRAFT.docx"
     }
   ]
 }

@@ -43,6 +43,7 @@ Output only the complete report. Use exactly the headings given above, each on i
 | Case ID | SYN-2026-006 |
 | Received | 2026-04-08 |
 | Category | Packaging damage |
+| Product | SYN Tablets 50 mg |
 | Product group | Tablets |
 | Batch | SYN-LOT-26A011 |
 | Severity | Minor |
