@@ -1481,12 +1481,14 @@ function Invoke-CopilotHandoff {
         $value = Get-ConfigValue $cp $key
         if ($null -ne $value) { $arguments += @("-$key", [string][int]$value) }
     }
-    & $Executable @arguments
+    # The child's progress lines go to a log file, not into the return value.
+    $lines = @(& $Executable @arguments 2>&1 | ForEach-Object { [string]$_ })
     $exit = $LASTEXITCODE
+    Write-Utf8File (Join-Path $RunPath 'copilot-log.txt') (($lines -join "`n") + "`n")
     $status = $null
     if (Test-Path -LiteralPath $statusFile) { $status = Read-JsonFile $statusFile }
     if ($exit -ne 0) {
-        $reason = 'see the output above'
+        $reason = 'see copilot-log.txt'
         if ($null -ne $status -and $status.error) { $reason = $status.error }
         throw "Copilot handoff failed (exit code $exit): $reason"
     }
