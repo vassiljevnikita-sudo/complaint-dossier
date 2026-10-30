@@ -6,9 +6,9 @@ Status: the demo mode is tested in CI on every push. It uses a prewritten answer
 
 [Sample report (PDF)](docs/sample/complaint-dossier-sample-DRAFT.pdf) · [all files of the sample run](docs/sample/) · [Design note: GAMP 5 categories, risks, what validation would still need](docs/design-note.md)
 
-**Kurzfassung (Deutsch):** PowerShell-Werkzeug für die Trendauswertung von Reklamationen. Es liest Fälle aus einer Excel-Datei, berechnet Statistiken, übergibt einen Prompt an die Desktop-App von Microsoft 365 Copilot und erzeugt einen Word-Bericht mit Audit-Trail. Der Bericht bleibt ein Entwurf, bis eine prüfende Person ihn freigibt. Der Demo-Modus ist in CI getestet. Die Übergabe an Copilot ist umgesetzt, der vollständige Live-Ablauf mit der echten App ist aber noch nicht bestätigt. Ausgelegt nach GAMP-5-Prinzipien, nicht validiert. Alle Beispieldaten sind synthetisch.
+**Kurzfassung (Deutsch):** PowerShell-Werkzeug für die Trendauswertung von Reklamationen. Es liest Fälle aus einer Excel-Datei, berechnet Statistiken, übergibt einen Prompt an die Desktop-App von Microsoft 365 Copilot und erzeugt einen Word-Bericht und ein Audit-Log (SHA-256-Hashes). Der Bericht bleibt ein Entwurf, bis eine prüfende Person ihn freigibt. Der Demo-Modus ist in CI getestet. Die Übergabe an Copilot ist umgesetzt, der vollständige Live-Ablauf mit der echten App ist aber noch nicht bestätigt. Ausgelegt nach GAMP-5-Prinzipien, nicht validiert. Alle Beispieldaten sind synthetisch.
 
-![Demo run: draft report, approval, audit log](docs/images/demo.gif)
+![Demo run: draft report, shared batch from the statistics, approval, audit log](docs/images/demo.gif)
 
 ## Try it
 
