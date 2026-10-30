@@ -4,12 +4,12 @@
     "name": "Complaint Dossier",
     "version": "0.2.0"
   },
-  "runId": "20261030T043732Z-2934a4",
+  "runId": "20261030T043840Z-2a9740",
   "mode": "demo",
   "status": "DRAFT",
   "operator": {
-    "osAccount": "plotn",
-    "host": "PowerShell 7.6.9 (Core)"
+    "osAccount": "runneradmin",
+    "host": "PowerShell 7.6.7 (Core)"
   },
   "model": {
     "configured": "none (demo mode)",
@@ -98,8 +98,8 @@
       "sha256": "3ee9e5edfd2149f32fd3691eff2d8b437132dd66d89ad562feec117a07530b41"
     },
     "report": {
-      "file": "complaint-dossier-20261030T043732Z-2934a4-DRAFT.docx",
-      "sha256": "5bebcbd49492e2a5e94ac12b745d8bf9c2c6a7da62942c5e17f0cea7f9ebcb1d"
+      "file": "complaint-dossier-20261030T043840Z-2a9740-DRAFT.docx",
+      "sha256": "4fd3d82ef39bf352688af9d1e8a030a6df90d3f331dfaac1b70a45407b405e75"
     }
   },
   "checks": [
@@ -131,29 +131,29 @@
   },
   "events": [
     {
-      "atUtc": "2026-10-30T04:37:32Z",
+      "atUtc": "2026-10-30T04:38:40Z",
       "event": "run-started",
       "detail": "mode=Demo"
     },
     {
-      "atUtc": "2026-10-30T04:37:32Z",
+      "atUtc": "2026-10-30T04:38:40Z",
       "event": "cases-read",
       "detail": "10 cases, 6 documents"
     },
     {
-      "atUtc": "2026-10-30T04:37:32Z",
+      "atUtc": "2026-10-30T04:38:40Z",
       "event": "prompt-built",
       "detail": "6182 characters"
     },
     {
-      "atUtc": "2026-10-30T04:37:32Z",
+      "atUtc": "2026-10-30T04:38:40Z",
       "event": "response-received",
       "detail": "demo response copied"
     },
     {
-      "atUtc": "2026-10-30T04:37:32Z",
+      "atUtc": "2026-10-30T04:38:40Z",
       "event": "report-written",
-      "detail": "complaint-dossier-20261030T043732Z-2934a4-DRAFT.docx"
+      "detail": "complaint-dossier-20261030T043840Z-2a9740-DRAFT.docx"
     }
   ]
 }
