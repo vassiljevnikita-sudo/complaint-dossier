@@ -55,6 +55,8 @@ $root = $PSScriptRoot
 Import-Module (Join-Path (Join-Path $root 'src') 'ComplaintDossier.psm1') -Force
 
 if ($Demo -and $Live) { throw 'Choose one mode: -Demo or -Live.' }
+# Run.cmd passes "-CaseId A,B" as one text; split it into complaint numbers.
+if ($CaseId) { $CaseId = @($CaseId | ForEach-Object { $_ -split '[,;\s]+' } | Where-Object { $_ }) }
 $mode = 'Live'
 if ($Demo) { $mode = 'Demo' }
 if (-not $ConfigPath) {

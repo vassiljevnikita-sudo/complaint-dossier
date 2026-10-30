@@ -77,6 +77,18 @@ BeforeAll {
         New-ZipPackage -Path $Path -Parts $parts
         $Path
     }
+    function Get-ZipContentHash([string]$Path) {
+        # Hash of the unpacked entries. The packed bytes differ between the zlib
+        # builds of Windows and Linux, the content does not.
+        $zip = [IO.Compression.ZipFile]::OpenRead($Path)
+        try {
+            $text = @($zip.Entries | Sort-Object FullName | ForEach-Object {
+                    $r = New-Object IO.StreamReader($_.Open())
+                    try { $_.FullName + "`n" + $r.ReadToEnd() } finally { $r.Dispose() }
+                }) -join "`n"
+        } finally { $zip.Dispose() }
+        Get-TextSha256 $text
+    }
     function Get-DocxPart([string]$Path, [string]$Name) {
         $zip = [IO.Compression.ZipFile]::OpenRead($Path)
         try { $reader = New-Object IO.StreamReader($zip.GetEntry($Name).Open()); try { $reader.ReadToEnd() } finally { $reader.Dispose() } } finally { $zip.Dispose() }
@@ -648,7 +660,7 @@ Describe 'Generators' {
     It 'reproduce the committed complaint list, case folders and example templates' {
         $out = Join-Path $TestDrive 'samples'
         & (Join-Path $script:Root 'tools/New-SyntheticCases.ps1') -OutputPath $out 6> $null
-        Get-Sha256 (Join-Path $out 'complaint-list.xlsx') | Should -Be (Get-Sha256 (Join-Path $script:Root 'samples/complaint-list.xlsx'))
+        Get-ZipContentHash (Join-Path $out 'complaint-list.xlsx') | Should -Be (Get-ZipContentHash (Join-Path $script:Root 'samples/complaint-list.xlsx'))
         $committedRoot = Join-Path $script:Root 'samples/case-folders'
         $expected = @(Get-ChildItem -Recurse -File $committedRoot | ForEach-Object { $_.FullName.Substring($committedRoot.Length).Replace('\', '/') + '=' + (Get-Sha256 $_.FullName) } | Sort-Object)
         $generatedRoot = Join-Path $out 'case-folders'
@@ -657,7 +669,7 @@ Describe 'Generators' {
         $templates = Join-Path $TestDrive 'templates'
         & (Join-Path $script:Root 'tools/New-ExampleTemplates.ps1') -OutputFolder $templates 6> $null
         foreach ($name in 'short-report-template.docx', 'long-report-template.docx') {
-            Get-Sha256 (Join-Path $templates $name) | Should -Be (Get-Sha256 (Join-Path $script:Root "templates/$name")) -Because $name
+            Get-ZipContentHash (Join-Path $templates $name) | Should -Be (Get-ZipContentHash (Join-Path $script:Root "templates/$name")) -Because $name
         }
     }
 }
