@@ -431,7 +431,7 @@ function Copy-CopilotResponse {
         $text = $null
         try { $text = [string](Get-Clipboard -Raw) } catch {}
         if (-not [string]::IsNullOrWhiteSpace($text) -and $text -ne $sentinel) {
-            if ((Get-TextHash $text) -eq (Get-TextHash $Prompt) -or $text.Contains('### Statistics (calculated by the tool)')) {
+            if ((Get-TextHash $text) -eq (Get-TextHash $Prompt) -or $text.Contains('### Complaint record (from the complaint list)')) {
                 throw 'The copied text is the prompt, not the answer.'
             }
             return $text

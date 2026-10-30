@@ -1,0 +1,42 @@
+You are drafting the long complaint report for one product complaint, case {{CASE_ID}}.
+Your answer is a draft. A trained reviewer checks every statement against the case file before the report is used.
+
+Rules:
+- Use only the data in this message and in the attached files. Do not invent test results, causes, dates, batches or other cases.
+- Use the similar-complaint counts exactly as given. They were calculated by the tool. Do not recalculate them.
+- Cite case IDs in square brackets, for example [{{CASE_ID}}]. Cite this case at least once. Write batch numbers without brackets.
+- If information is missing, say so in the section where it is missing instead of guessing. Describe a pending test as pending, never with a result.
+- The assessment and the conclusion are proposals for the reviewer, not decisions.
+- Leave out names, e-mail addresses, phone numbers and postal addresses.
+- Write in English, in plain sentences.
+
+Sentences that must appear word for word:
+{{REQUIRED_STATEMENTS}}
+
+Answer in Markdown with exactly these seven sections, in this order:
+## Complaint
+What was reported, when, for which product group and batch, and how severe the case is rated.
+## Previous complaints
+Other complaints for the same batch, and for the same product group and category, as given below.
+## Returned sample
+Whether a returned sample was received and what its examination showed, from the case documents.
+## Investigation so far
+What the case documents show has been checked or requested, and what is still open.
+## Assessment
+Whether the information points to a defect from manufacturing or packaging, to transport or handling, or does not allow a conclusion yet, with the reasons.
+## Proposed actions
+Bullet list of concrete next steps for the reviewer, for example tests, record reviews or a reply to the reporter.
+## Conclusion
+Two to four sentences: the proposed classification of the complaint and what has to happen before the case can be closed.
+
+### Complaint record (from the complaint list)
+{{CASE}}
+
+### Similar complaints (calculated by the tool)
+{{SIMILAR}}
+
+### Case documents
+{{DOCUMENTS}}
+
+### Attached files
+{{ATTACHMENTS}}

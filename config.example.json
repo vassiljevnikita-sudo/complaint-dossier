@@ -1,7 +1,7 @@
 {
   "Workbook": {
-    "Path": "samples/cases.xlsx",
-    "Sheet": "Cases",
+    "Path": "samples/complaint-list.xlsx",
+    "Sheet": "Complaints",
     "HeaderRow": 2,
     "Columns": {
       "CaseId": "CaseId",
@@ -11,26 +11,46 @@
       "Batch": "Batch",
       "Severity": "Severity",
       "Status": "Status",
+      "SampleReceived": "SampleReceived",
       "Description": "Description"
     }
   },
-  "Documents": {
-    "Path": "samples/documents",
-    "Extensions": [".txt", ".md"],
+  "Selection": {
+    "OpenStatuses": ["Open"]
+  },
+  "CaseFolders": {
+    "Path": "samples/case-folders",
+    "TextExtensions": [".txt", ".md"],
     "MaxCharsPerDocument": 4000
   },
+  "SimilarComplaints": {
+    "LookbackMonths": 12,
+    "RecentDays": 30
+  },
   "Prompt": {
-    "TemplatePath": "prompts/dossier-prompt.txt",
-    "RequiredSections": ["Summary", "Trends", "Cases needing attention", "Suggested follow-up", "Data gaps"],
     "MaskContactData": true
+  },
+  "Reports": {
+    "Short": {
+      "Marker": "short.txt",
+      "Title": "Complaint report (short)",
+      "PromptPath": "prompts/short-report.txt",
+      "RequiredSections": ["Complaint", "Similar complaints", "Assessment", "Conclusion"]
+    },
+    "Long": {
+      "Marker": "long.txt",
+      "Title": "Complaint report (long)",
+      "PromptPath": "prompts/long-report.txt",
+      "RequiredSections": ["Complaint", "Previous complaints", "Returned sample", "Investigation so far", "Assessment", "Proposed actions", "Conclusion"],
+      "NoSampleStatement": "No returned sample was available for examination."
+    }
   },
   "Report": {
     "TemplatePath": "templates/report-template.docx",
-    "OutputPath": "out",
-    "Title": "Complaint trend dossier"
+    "OutputPath": "out"
   },
   "Demo": {
-    "ResponsePath": "samples/demo-response.md"
+    "ResponsePath": "samples/demo-responses"
   },
   "Copilot": {
     "WindowTitle": "Microsoft 365 Copilot",
@@ -38,8 +58,8 @@
     "PreferredModelGroup": "",
     "TemporaryChat": true,
     "Upload": {
-      "Path": "samples/attachments",
-      "Extensions": [".pdf", ".docx", ".xlsx", ".txt", ".csv", ".png", ".jpg"],
+      "Path": "",
+      "Extensions": [".pdf", ".docx", ".xlsx", ".csv", ".png", ".jpg"],
       "MaxFiles": 3,
       "MaxFileSizeMB": 10
     },

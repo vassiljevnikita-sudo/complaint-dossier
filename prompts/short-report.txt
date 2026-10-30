@@ -1,0 +1,36 @@
+You are drafting the short complaint report for one product complaint, case {{CASE_ID}}.
+Your answer is a draft. A trained reviewer checks every statement against the case file before the report is used.
+
+Rules:
+- Use only the data in this message and in the attached files. Do not invent test results, causes, dates, batches or other cases.
+- Use the similar-complaint counts exactly as given. They were calculated by the tool. Do not recalculate them.
+- Cite case IDs in square brackets, for example [{{CASE_ID}}]. Cite this case at least once. Write batch numbers without brackets.
+- If information is missing, say so in the section where it is missing instead of guessing.
+- The conclusion is a proposal for the reviewer, not a decision.
+- Leave out names, e-mail addresses, phone numbers and postal addresses.
+- Write in English, in plain sentences.
+
+Sentences that must appear word for word:
+{{REQUIRED_STATEMENTS}}
+
+Answer in Markdown with exactly these four sections, in this order:
+## Complaint
+What was reported, when, for which product group and batch.
+## Similar complaints
+What the counts below say about this batch and about this product group and category.
+## Assessment
+What the available information supports, and what it does not.
+## Conclusion
+The likely type of the defect (for example product, packaging, transport or handling, or still open) and the next step you propose to the reviewer.
+
+### Complaint record (from the complaint list)
+{{CASE}}
+
+### Similar complaints (calculated by the tool)
+{{SIMILAR}}
+
+### Case documents
+{{DOCUMENTS}}
+
+### Attached files
+{{ATTACHMENTS}}

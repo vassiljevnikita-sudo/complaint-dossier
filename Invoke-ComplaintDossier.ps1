@@ -1,28 +1,37 @@
 <#
 .SYNOPSIS
-  Builds a complaint trend dossier: Excel cases -> statistics -> one prompt ->
-  Microsoft 365 Copilot (or a prewritten demo response) -> DRAFT Word report
-  with a JSON audit log (SHA-256 hashes).
+  Drafts one complaint report per case. Reads the complaint list (Excel),
+  selects the cases, builds a prompt from each case's row and case folder,
+  hands it to Microsoft 365 Copilot (or uses a prewritten demo answer) and
+  writes one DRAFT Word report with its own audit log (SHA-256 hashes) per case.
+
+.DESCRIPTION
+  Without -CaseId every open case of the complaint list is drafted (status
+  listed in Selection.OpenStatuses). The report type comes from a marker file
+  in the case folder: short.txt or long.txt. Cases without a marker, and cases
+  that already have an approved report, are skipped.
+  Each report stays DRAFT until a reviewer approves it with
+  Approve-ComplaintDossier.ps1.
 
 .EXAMPLE
   ./Invoke-ComplaintDossier.ps1 -Demo
-  Runs on the synthetic sample data with the prewritten sample response.
+  Drafts the open synthetic sample cases with prewritten sample answers.
   Needs no Excel, Word or Copilot.
 
 .EXAMPLE
-  ./Invoke-ComplaintDossier.ps1 -Live -CaseId SYN-2026-007
+  ./Invoke-ComplaintDossier.ps1 -Live -CaseId SYN-2026-006
   Sends one synthetic case to the Microsoft 365 Copilot desktop app
   (Windows only, unlocked desktop, Copilot window open). Reads config.json.
 #>
 [CmdletBinding()]
 param(
-    # Use the prewritten sample response instead of Copilot.
+    # Use the prewritten sample answers instead of Copilot.
     [switch]$Demo,
-    # Hand the prompt to the Microsoft 365 Copilot desktop app.
+    # Hand each prompt to the Microsoft 365 Copilot desktop app.
     [switch]$Live,
     # Defaults: config.example.json for -Demo, config.json for -Live.
     [string]$ConfigPath,
-    # Restrict the run to these case IDs.
+    # Draft only these cases (whatever their status). Default: all open cases.
     [string[]]$CaseId,
     # Folder for this run. Default: <Report.OutputPath>/<run id>.
     [string]$OutputPath,
@@ -43,140 +52,83 @@ if (-not $ConfigPath) {
 }
 # Resolve against the PowerShell location; .NET would use the process directory.
 $ConfigPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ConfigPath)
-
-$events = New-Object System.Collections.Generic.List[object]
-function Add-Event([string]$Name, [string]$Detail = '') {
-    $events.Add([pscustomobject]@{ atUtc = (Get-UtcStamp); event = $Name; detail = $Detail })
-}
-Add-Event 'run-started' "mode=$mode"
-
 $config = Import-DossierConfig -Path $ConfigPath -Root $root -Mode $mode
+
+# 1. Complaint list and case selection
+$cases = @(Import-DossierCases -Config $config)
+$selection = @(Select-DossierCases -Config $config -Cases $cases -CaseId $CaseId)
+$todo = @($selection | Where-Object { -not $_.SkipReason })
+$scope = 'all open cases'
+if ($CaseId) { $scope = 'case(s) ' + ($CaseId -join ', ') }
+Write-Host "[list]   $($cases.Count) cases in the complaint list; $($selection.Count) selected ($scope); $($todo.Count) to draft"
+foreach ($item in $selection | Where-Object { $_.SkipReason }) { Write-Host "[skip]   $($item.Case.CaseId): $($item.SkipReason)" }
+if ($todo.Count -eq 0) {
+    Write-Host '[done]   nothing to draft.'
+    if ($CaseId) { exit 1 }
+    return
+}
+
 $runId = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + ([guid]::NewGuid().ToString('N').Substring(0, 6))
 if (-not $OutputPath) { $OutputPath = Join-Path $config.Paths.Output $runId }
 $runPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputPath)
 if ((Test-Path -LiteralPath $runPath) -and @(Get-ChildItem -LiteralPath $runPath -Force).Count) { throw "Output folder is not empty: $runPath" }
 New-Item -ItemType Directory -Force -Path $runPath | Out-Null
-Write-Host "[run] $runId ($mode mode)"
-
-$inputs = New-Object System.Collections.Generic.List[object]
-function Add-Input([string]$Role, [string]$Path) {
-    $inputs.Add([pscustomobject]@{ role = $Role; path = (Get-RelativeDisplayPath $root $Path); sha256 = (Get-Sha256 $Path) })
-}
-Add-Input 'config' $config.Paths.Config
-Add-Input 'workbook' $config.Paths.Workbook
-Add-Input 'prompt-template' $config.Paths.PromptTemplate
-Add-Input 'report-template' $config.Paths.ReportTemplate
-
-# 1. Cases, statistics, documents
-$cases = @(Import-DossierCases -Config $config -CaseId $CaseId)
-$statistics = Get-DossierStatistics -Cases $cases
-$documents = @(Get-CaseDocuments -Config $config -Cases $cases)
-foreach ($doc in $documents) { Add-Input 'case-document' $doc.Path }
-Add-Event 'cases-read' "$($cases.Count) cases, $($documents.Count) documents"
-Write-Host "[data] $($cases.Count) cases, $($documents.Count) case documents, $($statistics.ByCategory.Count) categories, $($statistics.ByMonth.Count) months"
-
-$uploads = @()
-if ($mode -eq 'Live') {
-    $uploads = @(Get-UploadFiles -Config $config)
-    foreach ($file in $uploads) { Add-Input 'upload' $file.FullName }
-}
-
-# 2. Prompt
-$mask = $true
-if ($null -ne (Get-ConfigValue $config.Settings.Prompt 'MaskContactData')) { $mask = [bool]$config.Settings.Prompt.MaskContactData }
-$prompt = New-DossierPrompt -Template (Read-Utf8File $config.Paths.PromptTemplate) -Cases $cases -Statistics $statistics `
-    -Documents $documents -Attachments @($uploads | ForEach-Object { $_.Name }) -Mask $mask
-$promptFile = Join-Path $runPath 'prompt.txt'
-Write-Utf8File $promptFile $prompt
-$statisticsFile = Join-Path $runPath 'statistics.json'
-# JSON with LF line ends, so the hash is the same on every platform.
-Write-Utf8File $statisticsFile (($statistics | ConvertTo-Json -Depth 5).Replace("`r`n", "`n") + "`n")
-Add-Event 'prompt-built' "$($prompt.Length) characters"
-
-# 3. Response
-$responseFile = Join-Path $runPath 'response.md'
-$copilotStatus = $null
-if ($mode -eq 'Demo') {
-    Add-Input 'demo-response' $config.Paths.DemoResponse
-    Write-Utf8File $responseFile (Read-Utf8File $config.Paths.DemoResponse)
-    $modelText = 'none (demo mode)'
-    $modeText = 'Demo: prewritten sample response, Copilot not used'
-    $responseNote = 'Demo mode: the text below is a prewritten sample response for the synthetic data. It was not produced by Copilot.'
-    Add-Event 'response-received' 'demo response copied'
-} else {
-    $cp = $config.Settings.Copilot
-    $modelText = [string]$cp.PreferredModel
-    if ([string](Get-ConfigValue $cp 'PreferredModelGroup')) { $modelText = "$($cp.PreferredModelGroup) / $modelText" }
-    $modeText = 'Live: Microsoft 365 Copilot desktop app'
-    $responseNote = "Drafted by Microsoft 365 Copilot (configured model: $modelText). Check every statement against the case records."
-    Write-Host "[copilot] handing the prompt to '$($cp.WindowTitle)', model '$modelText', $($uploads.Count) upload(s)"
-    $copilotStatus = Invoke-CopilotHandoff -Config $config -PromptFile $promptFile -ResponseFile $responseFile -UploadFiles $uploads -RunPath $runPath
-    Add-Event 'response-received' "copilot, model=$modelText, uploads=$($uploads.Count)"
-}
-$response = Read-Utf8File $responseFile
-
-# 4. Checks and report
-$checks = @(Test-DossierResponse -Response $response -Prompt $prompt -RequiredSections @($config.Settings.Prompt.RequiredSections) -KnownCaseIds @($cases | ForEach-Object { $_.CaseId }))
-foreach ($check in $checks) {
-    $mark = 'FAIL'
-    if ($check.Passed) { $mark = 'pass' }
-    $detail = ''
-    if ($check.Detail) { $detail = " ($($check.Detail))" }
-    Write-Host ("[check] {0,-4} {1}{2}" -f $mark, $check.Name, $detail)
-}
-$title = 'Complaint trend dossier'
-if ([string](Get-ConfigValue $config.Settings.Report 'Title')) { $title = $config.Settings.Report.Title }
-$reportName = "complaint-dossier-$runId-DRAFT.docx"
-$reportFile = Join-Path $runPath $reportName
-$run = [pscustomobject]@{
-    RunId          = $runId
-    GeneratedAt    = [DateTime]::UtcNow.ToString('yyyy-MM-dd HH:mm:ss')
-    ModeText       = $modeText
-    Model          = $modelText
-    ResponseNote   = $responseNote
-    WorkbookSha256 = (Get-Sha256 $config.Paths.Workbook)
-    PromptSha256   = (Get-Sha256 $promptFile)
-    ResponseSha256 = (Get-Sha256 $responseFile)
-}
-New-DossierReport -TemplatePath $config.Paths.ReportTemplate -OutputPath $reportFile -Title $title -Run $run `
-    -Cases $cases -Statistics $statistics -Response $response -Checks $checks
-Add-Event 'report-written' $reportName
-
-# 5. Audit log (SHA-256 hashes)
-$artifact = { param($name) [pscustomobject]@{ file = $name; sha256 = (Get-Sha256 (Join-Path $runPath $name)) } }
-$audit = [pscustomobject][ordered]@{
-    schema    = 'complaint-dossier/audit/v2'
-    tool      = [pscustomobject]@{ name = 'Complaint Dossier'; version = (Get-DossierVersion) }
-    runId     = $runId
-    mode      = $mode.ToLowerInvariant()
-    status    = 'DRAFT'
-    operator  = [pscustomobject]@{ osAccount = [Environment]::UserName; host = 'PowerShell ' + $PSVersionTable.PSVersion.ToString() + ' (' + $PSVersionTable.PSEdition + ')' }
-    model     = [pscustomobject]@{ configured = $modelText; copilot = $copilotStatus }
-    caseIds   = @($cases | ForEach-Object { $_.CaseId })
-    inputs    = $inputs.ToArray()
-    artifacts = [pscustomobject][ordered]@{
-        prompt     = & $artifact 'prompt.txt'
-        statistics = & $artifact 'statistics.json'
-        response   = & $artifact 'response.md'
-        report     = & $artifact $reportName
-    }
-    checks    = @($checks | ForEach-Object { [pscustomobject]@{ name = $_.Name; passed = $_.Passed; detail = $_.Detail } })
-    review    = [pscustomobject]@{ reviewer = $null; approvedAtUtc = $null; comment = $null }
-    events    = $events.ToArray()
-}
-$auditFile = Join-Path $runPath 'audit.json'
-Save-AuditLog $audit $auditFile
-
 $displayRun = Get-RelativeDisplayPath $root $runPath -FullPathOutside
-Write-Host "[report] $displayRun/$reportName"
-Write-Host "[audit]  $displayRun/audit.json (report sha256 $($audit.artifacts.report.sha256))"
-$failedCount = @($checks | Where-Object { -not $_.Passed }).Count
-if ($failedCount) {
-    Write-Host "[next]   status DRAFT. $failedCount automated check(s) failed, so normal approval is refused. Start a new run, or after review accept the failures as a documented exception:"
-    Write-Host "         ./Approve-ComplaintDossier.ps1 -RunPath $displayRun -Reviewer 'Your Name' -AcceptFailedChecks -Justification '<reason>'"
-} else {
-    Write-Host "[next]   status DRAFT. After review: ./Approve-ComplaintDossier.ps1 -RunPath $displayRun -Reviewer 'Your Name'"
+Write-Host "[run]    $runId ($mode mode) -> $displayRun"
+
+# 2. One report per case. Cases run one after another, because the live path
+#    drives one Copilot window. A failed case does not stop the others.
+$results = New-Object System.Collections.Generic.List[object]
+foreach ($item in $selection) {
+    $id = $item.Case.CaseId
+    $typeName = $null
+    if ($item.Type) { $typeName = $item.Type.ToLowerInvariant() }
+    if ($item.SkipReason) {
+        $results.Add([pscustomobject][ordered]@{ caseId = $id; reportType = $typeName; status = 'skipped'; detail = $item.SkipReason; folder = $null; failedChecks = 0 })
+        continue
+    }
+    Write-Host ''
+    Write-Host "[case]   $id ($typeName report)"
+    try {
+        $report = New-DossierCaseReport -Config $config -Selected $item -AllCases $cases -RunId $runId -RunPath $runPath
+        foreach ($check in $report.Checks) {
+            $mark = 'FAIL'
+            if ($check.Passed) { $mark = 'pass' }
+            $detail = ''
+            if ($check.Detail) { $detail = " ($($check.Detail))" }
+            Write-Host ("[check]  {0,-4} {1}{2}" -f $mark, $check.Name, $detail)
+        }
+        $failed = @($report.Checks | Where-Object { -not $_.Passed }).Count
+        Write-Host "[report] $displayRun/$id/$([IO.Path]::GetFileName($report.Report))"
+        $results.Add([pscustomobject][ordered]@{ caseId = $id; reportType = $typeName; status = 'drafted'; detail = [IO.Path]::GetFileName($report.Report); folder = $id; failedChecks = $failed })
+    } catch {
+        Write-Host "[error]  $id`: $($_.Exception.Message)"
+        $results.Add([pscustomobject][ordered]@{ caseId = $id; reportType = $typeName; status = 'failed'; detail = $_.Exception.Message; folder = $null; failedChecks = 0 })
+    }
+}
+
+# 3. Run summary (not part of any report's audit log)
+$summary = [pscustomobject][ordered]@{
+    schema = 'complaint-dossier/run/v1'
+    runId  = $runId
+    mode   = $mode.ToLowerInvariant()
+    scope  = $scope
+    cases  = $results.ToArray()
+}
+Write-Utf8File (Join-Path $runPath 'run.json') (($summary | ConvertTo-Json -Depth 5).Replace("`r`n", "`n") + "`n")
+
+$drafted = @($results | Where-Object { $_.status -eq 'drafted' })
+$failedCases = @($results | Where-Object { $_.status -eq 'failed' })
+Write-Host ''
+Write-Host "[done]   $($drafted.Count) report(s) drafted, $(@($results | Where-Object { $_.status -eq 'skipped' }).Count) skipped, $($failedCases.Count) failed. Every report is DRAFT."
+foreach ($r in $drafted) {
+    if ($r.failedChecks) {
+        Write-Host "[next]   $($r.caseId): $($r.failedChecks) automated check(s) failed, so normal approval is refused. Draft it again, or after review: ./Approve-ComplaintDossier.ps1 -Path $displayRun/$($r.caseId) -Reviewer 'Your Name' -AcceptFailedChecks -Justification '<reason>'"
+    } else {
+        Write-Host "[next]   $($r.caseId): review the report, then ./Approve-ComplaintDossier.ps1 -Path $displayRun/$($r.caseId) -Reviewer 'Your Name'"
+    }
 }
 if ($PassThru) {
-    [pscustomobject]@{ RunId = $runId; RunPath = $runPath; Report = $reportFile; Audit = $auditFile; Checks = $checks }
+    [pscustomobject]@{ RunId = $runId; RunPath = $runPath; Cases = $results.ToArray() }
 }
+if ($failedCases.Count) { exit 2 }
